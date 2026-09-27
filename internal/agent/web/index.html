@@ -141,7 +141,7 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .node, .lane { position: relative; z-index: 1; }
 .probe { position: absolute; left: 0; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--pc);
   box-shadow: 0 0 12px 3px color-mix(in srgb, var(--pc), transparent 40%); pointer-events: none; }
-.lane-label { position: absolute !important; top: calc(50% + 24px); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.lane-label { grid-area: label; align-self: end; color: var(--muted); font-size: 11px; white-space: nowrap; }
 /* heartbeat bars, like Uptime Kuma's: one per check, newest on the right */
 .beats { display: flex; gap: 2px; height: 22px; align-items: stretch; }
 .beat { flex: 1; min-width: 2px; border-radius: 3px; background: color-mix(in srgb, var(--text), transparent 92%); transform-origin: bottom; }
@@ -156,11 +156,11 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
   -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px); mask: radial-gradient(circle, transparent 3.5px, #000 4px); }
 .live.ping .dot { animation: live-ping .9s ease-out; }
 @keyframes live-ping { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success), transparent 20%); } to { box-shadow: 0 0 0 7px transparent; } }
-.node { border-radius: 12px; background: var(--well); padding: 16px; display: grid; gap: 12px; align-content: start;
+.node { border-radius: 12px; background: var(--well); padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start;
   border: 1px solid var(--divider); transition: border-color .5s, box-shadow .5s, background-color .15s; }
 .node:has(.node-head:hover) { background: color-mix(in srgb, var(--text), transparent 95%); }
 .node.lit { border-color: color-mix(in srgb, var(--info), transparent 50%); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info), transparent 88%); }
-.node-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 0; border: 0; border-radius: 8px;
+.node-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: 100%; padding: 0; border: 0; border-radius: 8px;
   background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .node-id { display: grid; min-width: 0; }
 .more { width: 18px; height: 18px; color: var(--muted); transition: transform .15s, color .15s; }
@@ -180,7 +180,8 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 @keyframes halo { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc), transparent 50%); } 70%, to { box-shadow: 0 0 0 8px transparent; } }
 @keyframes glow { 50% { background-color: color-mix(in srgb, var(--sc), transparent 68%); } }
 .node-title { font-size: 15px; font-weight: 600; }
-.node-head .chip { margin-left: auto; }
+/* chip and chevron wrap together, to the right, when the head is narrow */
+.node-end { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px; align-items: center; }
 .pill { --c: var(--success); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 9px; border-radius: 999px;
   font: inherit; font-weight: 550; color: inherit; cursor: pointer; border: 1px solid color-mix(in srgb, var(--c), transparent 62%);
@@ -191,7 +192,13 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .pill .icon { width: 16px; height: 16px; color: var(--c); }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
 .empty { color: var(--muted); font-size: 12.5px; }
-.lane { position: relative; display: grid; place-items: center; align-content: center; gap: 8px; padding: 12px 8px; }
+/* the arrow sits on the link; the label above it, the services on their way below (beside it when vertical) */
+.lane { position: relative; display: grid; grid-template-rows: 1fr auto 1fr; grid-template-areas: "label" "arrow" "pills";
+  justify-items: center; gap: 8px; padding: 12px 8px; }
+.lane-pills { grid-area: pills; align-self: start; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+/* opaque, so the link does not show through them when it runs vertically behind */
+.lane-pills .pill { background: var(--paper); }
+.lane-pills .pill:hover { background: color-mix(in srgb, var(--text) 8%, var(--paper)); }
 /* the link between the two: still while everything is on the server; while
    traffic goes to the TNAS the dashes flow and a packet travels along them */
 .flow { --fc: var(--info); position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px;
@@ -205,8 +212,8 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .lane.back .flow, .lane.back .flow::after { animation-direction: reverse; }
 @keyframes flow { to { background-position: 12px 0; } }
 @keyframes packet { from { left: 0; } to { left: calc(100% - 8px); } }
-.lane > :not(.flow, .probe, .lane-label) { position: relative; }
-.lane-arrow { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--paper);
+.lane > :not(.flow, .probe) { position: relative; }
+.lane-arrow { grid-area: arrow; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--paper);
   border: 1px solid var(--divider); color: var(--muted); }
 .lane.moving .lane-arrow { color: var(--warning); border-color: color-mix(in srgb, var(--warning), transparent 50%); }
 .hero-foot { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px;
@@ -218,7 +225,7 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .section-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 4px -4px; }
 .section-head h2 { font-size: 16px; font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-.svc { --accent: var(--success); display: grid; gap: 14px; align-content: start; padding-bottom: 16px;
+.svc { --accent: var(--success); display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px;
   border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 16px; }
 .svc.alert { border-bottom-color: var(--accent); }
 .svc-head { display: flex; align-items: flex-start; gap: 12px; }
@@ -226,7 +233,8 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
   background: color-mix(in srgb, var(--accent), transparent 86%); }
 .svc-icon .icon { width: 22px; height: 22px; }
 .svc-id { min-width: 0; flex: 1; }
-.svc-id h3 { font-size: 15px; font-weight: 600; }
+.svc-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; }
+.svc-id h3 { font-size: 15px; font-weight: 600; white-space: nowrap; }
 .svc-open { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: inherit;
   font: inherit; cursor: pointer; }
 .svc-open:hover { color: var(--primary); }
@@ -244,7 +252,7 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .snap { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-md); background: var(--well); min-width: 0; }
 .snap .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snap .icon { width: 16px; height: 16px; color: var(--muted); }
-.svc-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+.svc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: auto;
   padding-top: 12px; border-top: 1px solid var(--divider); }
 
 /* rules + events */
@@ -261,7 +269,7 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .field { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 table.rules { width: 100%; border-collapse: collapse; }
 .rules th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 8px 8px 0; }
-.rules td { padding: 8px 8px 8px 0; border-top: 1px solid var(--divider); }
+.rules td { padding: 8px 8px 8px 0; border-top: 1px solid var(--divider); white-space: nowrap; }
 .rules td:first-child { font-weight: 550; }
 .unit { color: var(--muted); margin-left: 6px; }
 .form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 16px; }
@@ -337,13 +345,15 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 .note-text { color: var(--muted) !important; font-size: 12.5px; margin-top: 8px; }
 
 @media (max-width: 860px) {
-  .lower { grid-template-columns: 1fr; }
-  .topo { grid-template-columns: 1fr; grid-template-areas: "clients" "server" "lane" "tnas"; row-gap: 0; }
+  .lower { grid-template-columns: minmax(0, 1fr); }
+  .topo { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clients" "server" "lane" "tnas"; row-gap: 0; }
   .wires { display: none; }
   .clients { margin-bottom: 14px; }
   .probe { left: 50%; top: 0; }
-  .lane-label { top: auto; left: calc(50% + 26px); }
-  .lane { padding: 14px 0; }
+  .lane { grid-template: auto auto / minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: ". arrow label" "pills pills pills";
+    align-items: center; column-gap: 12px; padding: 14px 0; }
+  .lane-label { justify-self: start; align-self: center; white-space: normal; }
+  .lane-pills:empty { display: none; }
   .flow { left: 50%; right: auto; top: 0; bottom: 0; width: 2px; height: auto; margin: 0 0 0 -1px;
     background: repeating-linear-gradient(180deg, var(--divider) 0 6px, transparent 6px 12px); }
   .lane.active .flow { background-image: repeating-linear-gradient(180deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
@@ -355,7 +365,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   dialog.sheet { border-radius: 0; }
   .lane-arrow .icon { transform: rotate(90deg); }
 }
-@media (max-width: 420px) { .grid { grid-template-columns: 1fr; } .seg { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .grid { grid-template-columns: minmax(0, 1fr); } .seg { grid-template-columns: 1fr; } .rules input[type=number] { width: 52px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -659,7 +669,7 @@ function renderTopology() {
     <button class="node-head" data-panel="${kind}" aria-haspopup="dialog" title="Ver detalhes do ${title}">
       <span class="node-icon st st-${health.s}" title="${esc(health.why)}">${icon(ic)}</span>
       <span class="node-id"><span class="node-title">${title}</span><span class="mono muted">${esc(ip)}</span></span>
-      ${chipHtml}${icon('chevron', 'more')}</button>
+      <span class="node-end">${chipHtml}${icon('chevron', 'more')}</span></button>
     <div class="node-meta ${meta.warn ? 'warn' : ''}">${icon(meta.icon)}<span>${esc(meta.text)}</span></div>
     <div class="pills">${list.length ? list.map(pill).join('') : `<span class="empty">${empty}</span>`}</div>
     ${kind === 'server' ? `<div class="node-beats">${beatsBlock('npm')}</div>` : ''}`;
@@ -675,7 +685,7 @@ function renderTopology() {
   lane.classList.toggle('moving', at.moving.length > 0);
   lane.classList.toggle('back', back);
   $('nodeTnas').classList.toggle('lit', at.tnas.length > 0);
-  paint('lane', `<span class="flow"></span><span class="lane-arrow">${icon(at.moving.length ? 'swap' : 'arrow')}</span>${at.moving.map(pill).join('')}
+  paint('lane', `<span class="flow"></span><span class="lane-arrow">${icon(at.moving.length ? 'swap' : 'arrow')}</span><div class="lane-pills">${at.moving.map(pill).join('')}</div>
     <span class="lane-label">verifica a cada ${st.check_interval_s} s</span>`);
   paint('clients', `<span class="node-icon">${icon('devices')}</span><span><strong>Clientes</strong>
     <small>LAN e WireGuard${st.dns_zone ? `, *.${esc(st.dns_zone)}` : ''}</small></span>`);
@@ -812,9 +822,9 @@ function renderServices() {
     return `<article class="card svc ${s.state !== 'NORMAL' || !s.server_ok ? 'alert' : ''}" id="svc-${esc(s.name)}" style="--accent:${S.c}">
       <header class="svc-head">
         <span class="svc-icon">${icon(SVC_ICON[s.name])}</span>
-        <div class="svc-id"><h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}${icon('chevron', 'more')}</button></h3>
+        <div class="svc-id"><div class="svc-title"><h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}${icon('chevron', 'more')}</button></h3>
+          ${chip(S.label, S.c, S.busy ? 'busy' : fine(s) ? 'quiet' : '')}</div>
           <span class="mono" title="${esc(s.host)}">${esc(s.host)}</span></div>
-        ${chip(S.label, S.c, S.busy ? 'busy' : fine(s) ? 'quiet' : '')}
       </header>
       ${statusBlock(s)}
       <div class="svc-beats">${beatsBlock(s.name)}</div>
