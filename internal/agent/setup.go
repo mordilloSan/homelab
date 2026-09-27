@@ -47,7 +47,8 @@ func WriteOverrides(c *Config) {
 			log.Printf("%s: o override %s não existe", s.Name, dst)
 			continue
 		}
-		if err := os.MkdirAll(c.Paths.OverridesDir, 0o755); err == nil {
+		err = os.MkdirAll(c.Paths.OverridesDir, 0o755)
+		if err == nil {
 			err = writeAtomic(dst, b)
 		}
 		if err != nil {

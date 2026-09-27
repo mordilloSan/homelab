@@ -1,0 +1,36 @@
+# Every PR and every push to a dev/* branch: the same checks as `make lint test`,
+# so a warning is caught before the merge and not at the release.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["dev/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt e go vet
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: "latest"
+          install-mode: goinstall
+
+      - name: shellcheck
+        run: shellcheck e2e/run.sh
+
+      - name: Testes
+        run: go test -race ./...
