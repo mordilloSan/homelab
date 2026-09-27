@@ -1,4 +1,5 @@
-package main
+// Package agent is the failover agent: config, state machine, system calls and web UI.
+package agent
 
 import (
 	"bytes"
@@ -21,6 +22,9 @@ import (
 
 	"go.yaml.in/yaml/v3"
 )
+
+// Version is shown in the UI; main sets it from its build-time version.
+var Version = "dev"
 
 type Service struct {
 	Name          string `yaml:"name" json:"name"`
@@ -117,7 +121,7 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func loadConfig(path string) (Config, error) {
+func LoadConfig(path string) (Config, error) {
 	var c Config
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -230,6 +234,7 @@ type Agent struct {
 	tnasSeen  bool // last TNAS ping, so a change is logged once
 	userPath  string
 	creds     atomic.Pointer[creds] // read by every request, so outside mu
+	sessions  sessions
 }
 
 func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error) {
@@ -916,6 +921,7 @@ func (a *Agent) publish() {
 		Now              time.Time `json:"now"`
 		Version          string    `json:"version"`
 		DefaultPassword  bool      `json:"default_password"`
+		User             string    `json:"user"`
 		Mode             string    `json:"mode"`
 		CheckIntervalS   int       `json:"check_interval_s"`
 		StartTimeoutMin  int       `json:"start_timeout_min"`
@@ -943,7 +949,7 @@ func (a *Agent) publish() {
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
 	}{
-		a.now, version, a.creds.Load().Default, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled,
+		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, a.st.Events,

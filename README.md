@@ -4,19 +4,21 @@ Agente em Go que corre no TNAS e passa um serviço do servidor (`.66`) para uma 
 
 | Ficheiro | O que é |
 |---|---|
-| `agent.go` | Configuração, estado persistente e máquina de estados (um `Tick` por intervalo) |
-| `sys.go` | Efeitos reais: `docker compose`, `btrfs`, `arping`, `ping`, verificações HTTPS com `--resolve` e chamadas HTTP |
-| `web.go`, `index.html`, `inter.woff2` | Interface (HTTP Basic com bcrypt), no estilo da LinuxIO: mesmos tokens, ícones mdi e a fonte Inter (SIL OFL) embutida, sem internet |
-| `config/failover.yml` | Configuração por defeito, comentada, e a que vai dentro do binário |
-| `overrides/` | `immich.override.yml` (sem ML) e `unifi.override.yml` (`parent: ovs_eth0`) |
+| `main.go` | Arranque: flags, primeiro arranque, servidor HTTP e ciclo do agente |
+| `internal/agent/agent.go` | Configuração, estado persistente e máquina de estados (um `Tick` por intervalo) |
+| `internal/agent/sys.go` | Efeitos reais: `docker compose`, `btrfs`, `arping`, `ping`, verificações HTTPS com `--resolve` e chamadas HTTP |
+| `internal/agent/web.go`, `internal/agent/web/` | Interface (página de login com sessão, password em bcrypt), no estilo da LinuxIO: mesmos tokens, ícones mdi e a fonte Inter (SIL OFL) embutida, sem internet |
+| `internal/agent/config/failover.yml` | Configuração por defeito, comentada, e a que vai dentro do binário |
+| `internal/agent/overrides/` | `immich.override.yml` (sem ML) e `unifi.override.yml` (`parent: ovs_eth0`) |
+| `deploy/` | `Dockerfile` da imagem e o `docker-compose.yml` para o TNAS |
 | `e2e/run.sh` | Teste ponta a ponta com o Docker local |
 
 ## Instalar no TNAS
 
 O TNAS não compila nada. Uma tag `v*` no GitHub (`git tag v0.1.0 && git push --tags`) faz o [release.yml](.github/workflows/release.yml) correr os testes. Depois publica a imagem `ghcr.io/mordillosan/failover-agent` e anexa o binário à release.
 
-No TNAS basta o [docker-compose.yml](docker-compose.yml) em `/Volume1/Docker/failover/`. No primeiro arranque, o agente cria o que falta:
-- `config/failover.yml`, a partir de [config/failover.yml](config/failover.yml), em modo observe e com o DNS desligado;
+No TNAS basta o [docker-compose.yml](deploy/docker-compose.yml) em `/Volume1/Docker/failover/`. No primeiro arranque, o agente cria o que falta:
+- `config/failover.yml`, a partir de [config/failover.yml](internal/agent/config/failover.yml), em modo observe e com o DNS desligado;
 - `config/user.yml`, com o login `admin` / `admin`, guardado só como hash (bcrypt);
 - os overrides do Immich e do UniFi em `overrides/`.
 
@@ -27,7 +29,9 @@ docker compose pull && docker compose up -d
 
 Depois:
 1. entra em `http://192.168.1.249:8099` com `admin` / `admin` e usa **Mudar password**. Enquanto for a por defeito, a interface avisa. A password nova fica só como hash em `config/user.yml` e não aparece em nenhum log;
-2. revê o `config/failover.yml` (tokens do Kuma, DNS) e põe o token do Technitium em `config/technitium.token`.
+2. se perderes a password, apaga o `user.yml` e reinicia; volta a `admin` / `admin`:
+   `docker exec failover-agent rm /config/user.yml && docker restart failover-agent`;
+3. revê o `config/failover.yml` (tokens do Kuma, DNS) e põe o token do Technitium em `config/technitium.token`.
 
 Para atualizar, cria uma tag nova e faz `docker compose pull && docker compose up -d` no TNAS. `docker compose run --rm failover-agent version` mostra a versão instalada.
 

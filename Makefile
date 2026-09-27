@@ -1,4 +1,4 @@
-# Local targets. On the TNAS use docker-compose.yml directly (see README).
+# Local targets. On the TNAS use deploy/docker-compose.yml directly (see README).
 .PHONY: test lint e2e start stop logs server-down server-up
 
 test:

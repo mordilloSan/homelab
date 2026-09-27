@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"embed"
@@ -22,8 +22,8 @@ var (
 	defaultOverrides embed.FS
 )
 
-// firstRun writes the shipped config when there is none yet.
-func firstRun(cfgPath string) error {
+// FirstRun writes the shipped config when there is none yet.
+func FirstRun(cfgPath string) error {
 	if fileExists(cfgPath) {
 		return nil
 	}
@@ -34,9 +34,9 @@ func firstRun(cfgPath string) error {
 	return writeAtomic(cfgPath, defaultConfig)
 }
 
-// writeOverrides puts the shipped overrides in place when the config names
+// WriteOverrides puts the shipped overrides in place when the config names
 // one that is missing. An existing file is never touched.
-func writeOverrides(c *Config) {
+func WriteOverrides(c *Config) {
 	for _, s := range c.Services {
 		dst := filepath.Join(c.Paths.OverridesDir, s.Override)
 		if s.Override == "" || fileExists(dst) {

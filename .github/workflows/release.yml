@@ -40,7 +40,7 @@ jobs:
           if [[ $GITHUB_REF == refs/tags/* ]]; then tags+=(-t "$IMAGE:latest"); fi
           docker build --build-arg "VERSION=$VERSION" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            "${tags[@]}" .
+            "${tags[@]}" -f deploy/Dockerfile .
           docker push --all-tags "$IMAGE"
 
       - name: Binário

@@ -1,9 +1,10 @@
-package main
+package agent
 
 import (
-	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"time"
@@ -11,24 +12,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-//go:embed index.html
+//go:embed web/index.html
 var indexHTML []byte
 
 // Inter, the LinuxIO typeface (SIL OFL 1.1), embedded so the page needs no internet.
 //
-//go:embed inter.woff2
+//go:embed web/inter.woff2
 var interFont []byte
 
 func (a *Agent) Handler() http.Handler {
-	mux := http.NewServeMux()
+	mux := http.NewServeMux() // everything here needs a session
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(indexHTML)
-	})
-	mux.HandleFunc("GET /inter.woff2", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "font/woff2")
-		w.Header().Set("Cache-Control", "private, max-age=604800")
-		_, _ = w.Write(interFont)
 	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -42,31 +38,58 @@ func (a *Agent) Handler() http.Handler {
 		go a.scanImages()
 		w.WriteHeader(http.StatusAccepted)
 	})
-	return a.auth(mux)
-}
+	mux.HandleFunc("POST /api/logout", a.postLogout)
 
-// auth: HTTP Basic against user.yml.
-func (a *Agent) auth(next http.Handler) http.Handler {
+	root := http.NewServeMux() // open: the login and what it shows
+	root.HandleFunc("GET /login", a.getLogin)
+	root.HandleFunc("POST /login", a.postLogin)
+	root.HandleFunc("GET /inter.woff2", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "font/woff2")
+		w.Header().Set("Cache-Control", "private, max-age=604800")
+		_, _ = w.Write(interFont)
+	})
+	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	root.Handle("/", a.auth(mux))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c := a.creds.Load()
-		user, pw, ok := r.BasicAuth()
-		// both are always checked, so the time taken does not tell which one was wrong
-		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
-		pwOK := bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(pw)) == nil
-		if !ok || !userOK || !pwOK {
-			w.Header().Set("WWW-Authenticate", `Basic realm="failover", charset="UTF-8"`)
-			http.Error(w, "utilizador ou password errados", http.StatusUnauthorized)
-			return
-		}
-		// JSON only: a cross-site form cannot send it without a CORS preflight (CSRF).
-		if r.Method == http.MethodPost && r.Header.Get("Content-Type") != "application/json" {
-			http.Error(w, "Content-Type tem de ser application/json", http.StatusUnsupportedMediaType)
-			return
-		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Frame-Options", "DENY")
-		next.ServeHTTP(w, r)
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		root.ServeHTTP(w, r)
 	})
+}
+
+// UIURL is the address to open the UI at: listen (ui.listen) with host in
+// place of an unspecified address like 0.0.0.0.
+func UIURL(listen, host string) (string, error) {
+	h, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", err
+	}
+	if ip := net.ParseIP(h); h == "" || ip != nil && ip.IsUnspecified() {
+		h = host
+	}
+	return "http://" + net.JoinHostPort(h, port), nil
+}
+
+// Healthcheck asks the UI at listen for /healthz, on loopback when it listens
+// everywhere; the image's HEALTHCHECK runs it as "failover-agent healthcheck".
+func Healthcheck(listen string) error {
+	u, err := UIURL(listen, "127.0.0.1")
+	if err != nil {
+		return err
+	}
+	c := http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get(u + "/healthz")
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -201,7 +224,7 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.New) < 8 || len(req.New) > 72 { // bcrypt ignores anything past 72 bytes
-		http.Error(w, "a nova password tem de ter entre 8 e 72 caracteres", http.StatusBadRequest)
+		http.Error(w, "a nova password tem de ter entre 8 e 72 caracteres (os acentos contam a dobrar)", http.StatusBadRequest)
 		return
 	}
 	n, err := newCreds(c.User, req.New)
@@ -213,6 +236,7 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.creds.Store(n)
+	a.sessions.keepOnly(token(r)) // whoever knew the old password is logged out
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.now = time.Now()

@@ -28,7 +28,9 @@ cleanup() {
 	rm -rf "$W"
 }
 
-status() { curl -sf -u "admin:$pw" http://127.0.0.1:18099/api/status; }
+# the UI logs in with a form and a session cookie; a restarted agent forgets the session
+login() { curl -sf -o /dev/null -c "$W/cookies" -d username=admin -d "password=$pw" http://127.0.0.1:18099/login; }
+status() { curl -sf -b "$W/cookies" http://127.0.0.1:18099/api/status || { login && curl -sf -b "$W/cookies" http://127.0.0.1:18099/api/status; }; }
 
 # wait_for <jq condition> <timeout s> <description>
 wait_for() {
@@ -65,7 +67,7 @@ if [[ $cmd == test ]]; then
 fi
 mkdir -p "$W"
 
-docker build -q -t "$image" "$here" >/dev/null
+docker build -q -t "$image" -f "$here/deploy/Dockerfile" "$here" >/dev/null
 docker network create --subnet 10.123.1.0/24 e2e-srv >/dev/null
 # a fixed bridge name, so the agent can arping on it (lan_iface)
 docker network create --subnet 10.123.2.0/24 -o com.docker.network.bridge.name=br-e2e-tnas e2e-tnas >/dev/null
