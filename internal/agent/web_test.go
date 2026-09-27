@@ -14,6 +14,8 @@ import (
 
 // T-18: the login form (admin/admin at first), sessions, JSON only, edits
 // applied and persisted without a restart, and the password change.
+//
+//nolint:gocognit,cyclop // one request table walked in order, like a session in the browser
 func TestUI(t *testing.T) {
 	a, _ := setup(t)
 	srv := httptest.NewServer(a.Handler())
