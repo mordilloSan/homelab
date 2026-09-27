@@ -588,6 +588,7 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 	if err == nil && c.DNS.Enabled && !s.DNS {
 		if err = a.dns("add", sv.Host); err == nil {
 			s.DNS = true
+			a.event(sv.Name, "DNS: "+sv.Host+" → "+c.TNASIP+" (TNAS)")
 		} else {
 			err = fmt.Errorf("DNS: %w", err)
 		}
@@ -621,6 +622,7 @@ func (a *Agent) teardown(sv Service, s *SvcState) error {
 			return fmt.Errorf("DNS: %w", err)
 		}
 		s.DNS = false
+		a.event(sv.Name, "DNS: "+sv.Host+" de volta ao servidor")
 	}
 	if err := a.compose(sv.Name, nil, "down", "-v"); err != nil {
 		return err

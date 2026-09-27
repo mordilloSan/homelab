@@ -160,6 +160,10 @@ func hasGet(f *fake, sub string) bool {
 	return slices.ContainsFunc(f.gets, func(u string) bool { return strings.Contains(u, sub) })
 }
 
+func hasEvent(a *Agent, sub string) bool {
+	return slices.ContainsFunc(a.st.Events, func(e Event) bool { return strings.Contains(e.Msg, sub) })
+}
+
 // T-14 + T-20 + R1: only vaultwarden fails; failover at 5 min, return after
 // 10 min stable, undone in order: DNS, down, snapshot; then the TNAS NPM.
 func TestPartialFailoverAndReturn(t *testing.T) {
@@ -182,6 +186,9 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 	if !hasGet(f, "records/add?") || !hasGet(f, "domain=bitwarden.engmariz.com") || !hasGet(f, "ttl=60") {
 		t.Fatalf("DNS não mudou: %v", f.gets)
 	}
+	if !hasEvent(a, "DNS: bitwarden.engmariz.com → "+tnas) {
+		t.Fatalf("sem evento do DNS: %v", a.st.Events)
+	}
 	if !hasGet(f, "/api/push/vwtok?msg=em+failover+no+TNAS&status=down") {
 		t.Fatalf("Kuma não recebeu o down: %v", f.gets)
 	}
@@ -199,6 +206,9 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 	down, del := f.ran("docker compose -p failover-vaultwarden down -v"), f.ran("btrfs subvolume delete "+snap)
 	if !hasGet(f, "records/delete?") || down < 0 || del < down {
 		t.Fatalf("R1 violado: %v", f.cmds)
+	}
+	if !hasEvent(a, "DNS: bitwarden.engmariz.com de volta ao servidor") {
+		t.Fatalf("sem evento do regresso do DNS: %v", a.st.Events)
 	}
 	if f.ran("docker compose -p failover-npm down -v") < del || f.ran("btrfs subvolume delete "+npmSnap) < 0 {
 		t.Fatalf("NPM do TNAS não parou: %v", f.cmds)
