@@ -1,4 +1,4 @@
-config/user.yml
-config/technitium.token
+user.yml
+technitium.token
 state/
 .e2e/

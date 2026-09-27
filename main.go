@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/mordilloSan/homelab/internal/agent"
 )
 
 // version is set at build time (-X main.version=v1.2.3) by the release workflow.
@@ -25,16 +27,17 @@ func main() {
 		return
 	}
 
-	if err := firstRun(*cfgPath); err != nil {
+	agent.Version = version
+	if err := agent.FirstRun(*cfgPath); err != nil {
 		log.Fatal(err)
 	}
-	cfg, err := loadConfig(*cfgPath)
+	cfg, err := agent.LoadConfig(*cfgPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	writeOverrides(&cfg)
+	agent.WriteOverrides(&cfg)
 	_ = os.MkdirAll(filepath.Dir(*statePath), 0o755)
-	a, err := NewAgent(cfg, *cfgPath, *statePath, realSys{})
+	a, err := agent.NewAgent(cfg, *cfgPath, *statePath, agent.RealSys{})
 	if err != nil {
 		log.Fatal(err)
 	}

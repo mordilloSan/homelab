@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bytes"
@@ -16,15 +16,15 @@ import (
 	"time"
 )
 
-type realSys struct{}
+type RealSys struct{}
 
-func (s realSys) Run(name string, args ...string) error {
+func (s RealSys) Run(name string, args ...string) error {
 	_, err := s.Output(name, args...)
 	return err
 }
 
 // Output returns stdout; stderr (compose warnings, errors) only goes into the error.
-func (realSys) Output(name string, args ...string) (string, error) {
+func (RealSys) Output(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -42,7 +42,7 @@ func (realSys) Output(name string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-func (realSys) Check(host, ip string) error {
+func (RealSys) Check(host, ip string) error {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	c := &http.Client{
 		Timeout: 10 * time.Second,
@@ -72,7 +72,7 @@ func (realSys) Check(host, ip string) error {
 
 var apiClient = &http.Client{Timeout: 10 * time.Second}
 
-func (realSys) Get(u, bearer string) ([]byte, error) {
+func (RealSys) Get(u, bearer string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, errors.New("URL inválido")

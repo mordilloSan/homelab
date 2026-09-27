@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"errors"
@@ -110,7 +110,7 @@ func init() { bcryptCost = bcrypt.MinCost }
 // newTestAgent loads the example config, so the shipped file is tested too.
 func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	t.Helper()
-	cfg, err := loadConfig("config/failover.yml")
+	cfg, err := LoadConfig("config/failover.yml")
 	if err != nil {
 		t.Fatal(err)
 	}

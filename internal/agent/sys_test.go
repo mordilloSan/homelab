@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"net"
@@ -26,7 +26,7 @@ func TestCheckResolve(t *testing.T) {
 	}))
 	defer ts.Close()
 	_, port, _ := net.SplitHostPort(ts.Listener.Addr().String())
-	var s realSys
+	var s RealSys
 	if err := s.Check("ok.engmariz.com:"+port, "127.0.0.1"); err != nil {
 		t.Errorf("ok: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestComposeDownByProjectName(t *testing.T) {
 	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var s realSys
+	var s RealSys
 	count := func(args ...string) int {
 		out, _ := exec.Command("docker", append(args, "-q", "--filter", "label=com.docker.compose.project=failover-itest")...).Output()
 		return len(strings.Fields(string(out)))

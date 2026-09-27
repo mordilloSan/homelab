@@ -1,7 +1,6 @@
-package main
+package agent
 
 import (
-	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"net/http"
@@ -11,24 +10,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-//go:embed index.html
+//go:embed web/index.html
 var indexHTML []byte
 
 // Inter, the LinuxIO typeface (SIL OFL 1.1), embedded so the page needs no internet.
 //
-//go:embed inter.woff2
+//go:embed web/inter.woff2
 var interFont []byte
 
 func (a *Agent) Handler() http.Handler {
-	mux := http.NewServeMux()
+	mux := http.NewServeMux() // everything here needs a session
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(indexHTML)
-	})
-	mux.HandleFunc("GET /inter.woff2", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "font/woff2")
-		w.Header().Set("Cache-Control", "private, max-age=604800")
-		_, _ = w.Write(interFont)
 	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -42,30 +36,22 @@ func (a *Agent) Handler() http.Handler {
 		go a.scanImages()
 		w.WriteHeader(http.StatusAccepted)
 	})
-	return a.auth(mux)
-}
+	mux.HandleFunc("POST /api/logout", a.postLogout)
 
-// auth: HTTP Basic against user.yml.
-func (a *Agent) auth(next http.Handler) http.Handler {
+	root := http.NewServeMux() // open: the login and what it shows
+	root.HandleFunc("GET /login", a.getLogin)
+	root.HandleFunc("POST /login", a.postLogin)
+	root.HandleFunc("GET /inter.woff2", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "font/woff2")
+		w.Header().Set("Cache-Control", "private, max-age=604800")
+		_, _ = w.Write(interFont)
+	})
+	root.Handle("/", a.auth(mux))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c := a.creds.Load()
-		user, pw, ok := r.BasicAuth()
-		// both are always checked, so the time taken does not tell which one was wrong
-		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
-		pwOK := bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(pw)) == nil
-		if !ok || !userOK || !pwOK {
-			w.Header().Set("WWW-Authenticate", `Basic realm="failover", charset="UTF-8"`)
-			http.Error(w, "utilizador ou password errados", http.StatusUnauthorized)
-			return
-		}
-		// JSON only: a cross-site form cannot send it without a CORS preflight (CSRF).
-		if r.Method == http.MethodPost && r.Header.Get("Content-Type") != "application/json" {
-			http.Error(w, "Content-Type tem de ser application/json", http.StatusUnsupportedMediaType)
-			return
-		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Frame-Options", "DENY")
-		next.ServeHTTP(w, r)
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		root.ServeHTTP(w, r)
 	})
 }
 
@@ -213,6 +199,7 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.creds.Store(n)
+	a.sessions.keepOnly(token(r)) // whoever knew the old password is logged out
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.now = time.Now()

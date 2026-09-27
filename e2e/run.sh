@@ -65,7 +65,7 @@ if [[ $cmd == test ]]; then
 fi
 mkdir -p "$W"
 
-docker build -q -t "$image" "$here" >/dev/null
+docker build -q -t "$image" -f "$here/deploy/Dockerfile" "$here" >/dev/null
 docker network create --subnet 10.123.1.0/24 e2e-srv >/dev/null
 # a fixed bridge name, so the agent can arping on it (lan_iface)
 docker network create --subnet 10.123.2.0/24 -o com.docker.network.bridge.name=br-e2e-tnas e2e-tnas >/dev/null

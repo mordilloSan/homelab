@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"net/http"
@@ -66,7 +66,7 @@ func TestUI(t *testing.T) {
 	if sv, _ := a.service("vaultwarden"); sv.WaitMin != 2 || sv.StabilityMin != 4 || a.cfg.CheckIntervalS != 30 {
 		t.Errorf("config não aplicada: %+v", sv)
 	}
-	if saved, err := loadConfig(a.cfgPath); err != nil || saved.Services[0].WaitMin != 2 {
+	if saved, err := LoadConfig(a.cfgPath); err != nil || saved.Services[0].WaitMin != 2 {
 		t.Errorf("config não guardada: %v", err)
 	}
 	if a.st.Services["immich"].MaintUntil.IsZero() || state(a, "homepage") != FailingOver {
@@ -85,16 +85,16 @@ func TestUI(t *testing.T) {
 // First start on an empty TNAS: the shipped config is written, and never over an existing one.
 func TestFirstRun(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config", "failover.yml")
-	if err := firstRun(p); err != nil {
+	if err := FirstRun(p); err != nil {
 		t.Fatal(err)
 	}
-	if cfg, err := loadConfig(p); err != nil || cfg.Mode != "observe" {
+	if cfg, err := LoadConfig(p); err != nil || cfg.Mode != "observe" {
 		t.Fatalf("config criada errada: %v", err)
 	}
 	if err := os.WriteFile(p, []byte("editado"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := firstRun(p); err != nil {
+	if err := FirstRun(p); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(p); string(b) != "editado" {
