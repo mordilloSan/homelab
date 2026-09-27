@@ -1,4 +1,4 @@
 .e2e
 state
-config/failover.yml
+config/user.yml
 config/technitium.token

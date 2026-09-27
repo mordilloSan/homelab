@@ -1,12 +1,12 @@
-# Copiar para config/failover.yml. A interface reescreve este ficheiro ao guardar
-# (os comentários perdem-se); fica aqui a versão comentada.
+# Criado assim no primeiro arranque, se não existir. A interface reescreve-o ao
+# guardar (os comentários perdem-se). O login da interface fica em user.yml.
 
 mode: observe                 # observe: só regista o que faria · auto: age
 server:
-  ip: 192.168.1.66
-  npm_check_host: nginx.engmariz.com   # R2: verificado primeiro, pelo .66
-tnas_ip: 192.168.1.249                 # cópias verificadas por aqui (R5) e destino do DNS
-router_ip: 192.168.1.1                 # R6
+  ip: 192.168.1.66                     # IP do servidor
+  npm_check_host: nginx.engmariz.com   # URL do NPM no servidor
+tnas_ip: 192.168.1.249                 # IP da NAS
+router_ip: 192.168.1.1                 # IP da Gateway
 lan_iface: ovs_eth0                    # interface do arping (R3)
 check_interval_s: 60
 start_timeout_min: 10                  # a cópia tem este tempo para ficar saudável, senão ERROR
@@ -71,5 +71,4 @@ nightly:
   prepull_at: "05:00"                  # depois do espelho das 04:30; "" desliga
 
 ui:
-  listen: 0.0.0.0:8099
-  password_hash: ""                    # echo 'password' | docker compose run --rm -T failover-agent hash
+  listen: 0.0.0.0:8099                 # entra com admin / admin e muda a password na interface
