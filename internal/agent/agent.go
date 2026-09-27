@@ -350,8 +350,40 @@ func (a *Agent) warn(msg *string, svc, m string) {
 	}
 }
 
-func (a *Agent) ping(ip string) bool {
-	return a.sys.Run("ping", "-c", "1", "-W", "2", ip) == nil
+func (a *Agent) ping(ip string) bool { return a.pingErr(ip) == nil }
+
+func (a *Agent) pingErr(ip string) error { return a.sys.Run("ping", "-c", "1", "-W", "2", ip) }
+
+// Preflight logs, once at the start, what the agent can reach. A failure is a
+// warning: the ticks decide what to do about it.
+func (a *Agent) Preflight() {
+	a.mu.Lock()
+	c := a.cfg
+	a.mu.Unlock()
+	check := func(what string, err error) {
+		if err != nil {
+			slog.Warn("arranque: "+what+" falhou", "error", err)
+			return
+		}
+		slog.Info("arranque: " + what)
+	}
+	check("ping ao router "+c.RouterIP, a.pingErr(c.RouterIP))
+	check("ping ao TNAS "+c.TNASIP, a.pingErr(c.TNASIP))
+	check("ping ao servidor "+c.Server.IP, a.pingErr(c.Server.IP))
+	check("NPM do servidor (https://"+c.Server.NPMCheckHost+")", a.sys.Check(c.Server.NPMCheckHost, c.Server.IP))
+	// What a failover needs to pull a missing image. Any HTTP answer means it
+	// was reached: without a login the registry answers 401.
+	_, err := a.sys.Get("https://registry-1.docker.io/v2/", "")
+	if err != nil && strings.HasPrefix(err.Error(), "HTTP ") {
+		err = nil
+	}
+	check("internet (registry-1.docker.io)", err)
+	if !c.DNS.Enabled {
+		slog.Info("arranque: DNS desligado")
+		return
+	}
+	b, _ := os.ReadFile(c.DNS.TokenFile)
+	check("token do Technitium ("+c.DNS.APIURL+")", testToken(a.sys, c.DNS.APIURL, c.DNS.Zone, strings.TrimSpace(string(b))))
 }
 
 func (a *Agent) inMaint(s *SvcState) bool {
@@ -664,11 +696,11 @@ func (a *Agent) teardown(sv Service, s *SvcState) error {
 		s.DNS = false
 		a.event(sv.Name, "DNS: "+sv.Host+" de volta ao servidor")
 	}
-	if err := a.compose(sv.Name, nil, "down", "-v"); err != nil {
+	if err := a.down(sv.Name, sv.Name); err != nil {
 		return err
 	}
 	if s.Snapshot != "" {
-		if err := a.deleteSnapshot(s.Snapshot); err != nil {
+		if err := a.deleteSnapshot(sv.Name, s.Snapshot); err != nil {
 			return err
 		}
 		s.Snapshot = ""
@@ -713,9 +745,9 @@ func (a *Agent) stopIdleNPM() {
 			return
 		}
 	}
-	err := a.compose("npm", nil, "down", "-v")
+	err := a.down("", "npm")
 	if err == nil {
-		err = a.deleteSnapshot(n.Snapshot)
+		err = a.deleteSnapshot("", n.Snapshot)
 	}
 	if err != nil {
 		a.warn(&n.Msg, "", "NPM do TNAS por parar: "+err.Error())
@@ -735,9 +767,31 @@ func (a *Agent) snapshot(name string) (string, error) {
 	return dst, nil
 }
 
+// down removes a compose project's containers and named volumes (O3), then
+// asks Docker whether any is left: a return is only done when nothing is.
+func (a *Agent) down(svc, project string) error {
+	if err := a.compose(project, nil, "down", "-v"); err != nil {
+		return err
+	}
+	label := "label=com.docker.compose.project=failover-" + project
+	var left []string
+	for _, ls := range [][]string{{"ps", "-a", "-q"}, {"volume", "ls", "-q"}} {
+		out, err := a.sys.Output("docker", slices.Concat(ls, []string{"--filter", label})...)
+		if err != nil {
+			return err
+		}
+		left = append(left, strings.Fields(out)...)
+	}
+	if left != nil {
+		return fmt.Errorf("ficaram containers ou volumes de failover-%s: %s", project, strings.Join(left, " "))
+	}
+	a.event(svc, "containers e volumes de failover-"+project+" removidos")
+	return nil
+}
+
 // deleteSnapshot only touches failover-* entries directly inside snapshots_dir:
 // btrfs subvolume delete does not ask and must never reach the mirror.
-func (a *Agent) deleteSnapshot(p string) error {
+func (a *Agent) deleteSnapshot(svc, p string) error {
 	dir := filepath.Clean(a.cfg.Paths.SnapshotsDir)
 	if p != filepath.Clean(p) || filepath.Dir(p) != dir || !strings.HasPrefix(filepath.Base(p), "failover-") ||
 		p == filepath.Clean(a.cfg.Paths.MirrorSubvol) {
@@ -746,7 +800,14 @@ func (a *Agent) deleteSnapshot(p string) error {
 	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	return a.sys.Run("btrfs", "subvolume", "delete", p)
+	if err := a.sys.Run("btrfs", "subvolume", "delete", p); err != nil {
+		return err
+	}
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("o snapshot %s continua em %s depois do btrfs subvolume delete", filepath.Base(p), filepath.Dir(p))
+	}
+	a.event(svc, "snapshot "+filepath.Base(p)+" apagado")
+	return nil
 }
 
 func (c *Config) files(root, dir, override string) []string {
@@ -798,6 +859,14 @@ func technitium(sys System, apiURL, path string, q url.Values, token string) err
 		return fmt.Errorf("technitium %s: %s", r.Status, r.ErrorMessage)
 	}
 	return nil
+}
+
+// testToken asks the Technitium for the zone with token: ok means DNS changes will work.
+func testToken(sys System, apiURL, zone, token string) error {
+	if token == "" {
+		return errors.New("falta o token")
+	}
+	return technitium(sys, apiURL, "records/get", url.Values{"domain": {zone}, "zone": {zone}}, token)
 }
 
 // hasToken reports whether token_file holds a token; the token itself never leaves the file.
@@ -906,6 +975,8 @@ func (a *Agent) scanImages() {
 		scan(sv.Name, sv.Dir, sv.Override)
 	}
 
+	logImageBalance(stacks)
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.now = time.Now()
@@ -918,6 +989,27 @@ func (a *Agent) scanImages() {
 		a.event("", "todas as imagens estão no TNAS")
 	}
 	a.save()
+}
+
+// logImageBalance logs how many of the images the stacks need the TNAS has,
+// each image counted once however many stacks use it.
+func logImageBalance(stacks map[string]Stack) {
+	seen := map[string]Image{}
+	for _, st := range stacks {
+		for _, im := range st.Images {
+			seen[im.Ref] = im
+		}
+	}
+	var present int
+	var size int64
+	for _, im := range seen {
+		if im.Present {
+			present++
+			size += im.Size
+		}
+	}
+	gb := strings.Replace(strconv.FormatFloat(float64(size)/1e9, 'f', 1, 64), ".", ",", 1)
+	slog.Info(fmt.Sprintf("imagens: %d de %d no TNAS, %s GB", present, len(seen), gb))
 }
 
 // nightly pulls every image once a day after prepull_at, from the compose

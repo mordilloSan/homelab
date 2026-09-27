@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // T-18: the login form (admin/admin at first), sessions, JSON only, edits
@@ -169,6 +170,17 @@ func TestDNSSettings(t *testing.T) {
 	a.st.Services["vaultwarden"] = &SvcState{State: Active, DNS: true}
 	if post(`{"enabled":false}`) != 409 || !a.cfg.DNS.Enabled {
 		t.Fatal("desligou o DNS com um serviço apontado para o TNAS")
+	}
+}
+
+// Expired sessions are dropped when a new one is made, so the map does not grow forever.
+func TestSessionsPruned(t *testing.T) {
+	var s sessions
+	old := s.create()
+	s.m[old] = time.Now().Add(-time.Minute)
+	s.create()
+	if _, ok := s.m[old]; ok || len(s.m) != 1 {
+		t.Fatalf("sessões: %v", s.m)
 	}
 }
 

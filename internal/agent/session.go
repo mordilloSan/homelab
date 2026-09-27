@@ -35,7 +35,13 @@ func (s *sessions) create() string {
 	if s.m == nil {
 		s.m = map[string]time.Time{}
 	}
-	s.m[tok] = time.Now().Add(sessionTTL)
+	now := time.Now()
+	for t, exp := range s.m { // expired ones are otherwise only dropped if their cookie comes back
+		if now.After(exp) {
+			delete(s.m, t)
+		}
+	}
+	s.m[tok] = now.Add(sessionTTL)
 	return tok
 }
 

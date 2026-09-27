@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -271,8 +270,7 @@ func (a *Agent) postDNS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if test != "" { // outside the lock: the Technitium may take seconds to answer
-		q := url.Values{"domain": {d.Zone}, "zone": {d.Zone}}
-		if err := technitium(a.sys, d.APIURL, "records/get", q, test); err != nil {
+		if err := testToken(a.sys, d.APIURL, d.Zone, test); err != nil {
 			http.Error(w, "o Technitium recusou o token: "+err.Error(), http.StatusBadRequest)
 			return
 		}
