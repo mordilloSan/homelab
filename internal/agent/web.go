@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -34,6 +37,7 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("POST /api/maintenance", a.postMaintenance)
 	mux.HandleFunc("POST /api/action", a.postAction)
 	mux.HandleFunc("POST /api/password", a.postPassword)
+	mux.HandleFunc("POST /api/dns", a.postDNS)
 	mux.HandleFunc("POST /api/images", func(w http.ResponseWriter, _ *http.Request) {
 		go a.scanImages()
 		w.WriteHeader(http.StatusAccepted)
@@ -241,4 +245,71 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	a.now = time.Now()
 	a.done(w, "", "password da interface alterada")
+}
+
+// postDNS turns DNS on or off and replaces the Technitium token (empty keeps
+// it). The token in effect is tested first, so a wrong one is found here and
+// not in the middle of a failover.
+func (a *Agent) postDNS(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool   `json:"enabled"`
+		Token   string `json:"token"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	newToken := strings.TrimSpace(req.Token)
+	a.mu.Lock()
+	d := a.cfg.DNS
+	a.mu.Unlock()
+	test := newToken // the token in effect after this request
+	if test == "" && req.Enabled {
+		b, _ := os.ReadFile(d.TokenFile)
+		if test = strings.TrimSpace(string(b)); test == "" {
+			http.Error(w, "falta o token do Technitium", http.StatusBadRequest)
+			return
+		}
+	}
+	if test != "" { // outside the lock: the Technitium may take seconds to answer
+		q := url.Values{"domain": {d.Zone}, "zone": {d.Zone}}
+		if err := technitium(a.sys, d.APIURL, "records/get", q, test); err != nil {
+			http.Error(w, "o Technitium recusou o token: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !req.Enabled && slices.ContainsFunc(a.cfg.Services, func(sv Service) bool { return a.svc(sv.Name).DNS }) {
+		http.Error(w, "há serviços com o DNS a apontar para o TNAS: força o regresso primeiro", http.StatusConflict)
+		return
+	}
+	var msgs []string
+	if newToken != "" {
+		if err := writeAtomic(d.TokenFile, []byte(newToken+"\n")); err != nil {
+			http.Error(w, "guardar o token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		msgs = append(msgs, "token do Technitium alterado")
+	}
+	if req.Enabled != a.cfg.DNS.Enabled {
+		next := a.cfg
+		next.DNS.Enabled = req.Enabled
+		if err := next.validate(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := saveConfig(a.cfgPath, &next); err != nil {
+			http.Error(w, "guardar configuração: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		a.cfg = next
+		msgs = append(msgs, map[bool]string{true: "DNS ligado", false: "DNS desligado"}[req.Enabled])
+	}
+	if msgs == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	a.now = time.Now()
+	a.done(w, "", strings.Join(msgs, ", "))
 }

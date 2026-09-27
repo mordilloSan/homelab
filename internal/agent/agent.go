@@ -546,6 +546,9 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 	case FailingOver:
 		a.failover(sv, s)
 	case Active:
+		if err := a.addDNS(sv, s); err != nil { // DNS turned on during the failover
+			a.warn(&s.Msg, sv.Name, err.Error())
+		}
 		if !known {
 			return
 		}
@@ -586,13 +589,8 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 	}
 	// R5: the copy is checked through the TNAS NPM; DNS only after it is healthy.
 	err := a.sys.Check(sv.Host, c.TNASIP)
-	if err == nil && c.DNS.Enabled && !s.DNS {
-		if err = a.dns("add", sv.Host); err == nil {
-			s.DNS = true
-			a.event(sv.Name, "DNS: "+sv.Host+" → "+c.TNASIP+" (TNAS)")
-		} else {
-			err = fmt.Errorf("DNS: %w", err)
-		}
+	if err == nil {
+		err = a.addDNS(sv, s)
 	}
 	if err != nil {
 		if a.now.Sub(s.Since) >= minutes(c.StartTimeoutMin) {
@@ -604,6 +602,20 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 	}
 	a.set(s, Active)
 	a.event(sv.Name, "em failover no TNAS")
+}
+
+// addDNS points the service's name to the TNAS, when DNS is on and it is not yet.
+func (a *Agent) addDNS(sv Service, s *SvcState) error {
+	if !a.cfg.DNS.Enabled || s.DNS {
+		return nil
+	}
+	if err := a.dns("add", sv.Host); err != nil {
+		return fmt.Errorf("DNS: %w", err)
+	}
+	s.DNS = true
+	s.Msg = ""
+	a.event(sv.Name, "DNS: "+sv.Host+" → "+a.cfg.TNASIP+" (TNAS)")
+	return nil
 }
 
 // startCopy starts the TNAS NPM and the service from a new snapshot; false
@@ -761,7 +773,17 @@ func (a *Agent) dns(op, host string) error {
 		q.Set("ttl", strconv.Itoa(d.TTL))
 		q.Set("overwrite", "true")
 	}
-	body, err := a.sys.Get(strings.TrimRight(d.APIURL, "/")+"/api/zones/records/"+op+"?"+q.Encode(), strings.TrimSpace(string(tok)))
+	err = technitium(a.sys, d.APIURL, "records/"+op, q, strings.TrimSpace(string(tok)))
+	if op == "delete" && err != nil && strings.Contains(err.Error(), "no such record exists") {
+		return nil
+	}
+	return err
+}
+
+// technitium calls /api/zones/<path> of the Technitium API; its errorMessage
+// becomes the error.
+func technitium(sys System, apiURL, path string, q url.Values, token string) error {
+	body, err := sys.Get(strings.TrimRight(apiURL, "/")+"/api/zones/"+path+"?"+q.Encode(), token)
 	if err != nil {
 		return err
 	}
@@ -772,10 +794,16 @@ func (a *Agent) dns(op, host string) error {
 	if err := json.Unmarshal(body, &r); err != nil {
 		return fmt.Errorf("resposta inválida do Technitium: %w", err)
 	}
-	if r.Status == "ok" || op == "delete" && strings.Contains(r.ErrorMessage, "no such record exists") {
-		return nil
+	if r.Status != "ok" {
+		return fmt.Errorf("technitium %s: %s", r.Status, r.ErrorMessage)
 	}
-	return fmt.Errorf("technitium %s: %s", r.Status, r.ErrorMessage)
+	return nil
+}
+
+// hasToken reports whether token_file holds a token; the token itself never leaves the file.
+func (c *Config) hasToken() bool {
+	b, err := os.ReadFile(c.DNS.TokenFile)
+	return err == nil && strings.TrimSpace(string(b)) != ""
 }
 
 var stateMsg = map[string]string{
@@ -959,6 +987,8 @@ func (a *Agent) publish() {
 		StartTimeoutMin  int       `json:"start_timeout_min"`
 		DefaultExpiryMin int       `json:"default_expiry_min"`
 		DNSEnabled       bool      `json:"dns_enabled"`
+		DNSToken         bool      `json:"dns_token"`
+		DNSAPIURL        string    `json:"dns_api_url"`
 		ServerIP         string    `json:"server_ip"`
 		TNASIP           string    `json:"tnas_ip"`
 		RouterIP         string    `json:"router_ip"`
@@ -981,7 +1011,7 @@ func (a *Agent) publish() {
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
 	}{
-		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled,
+		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled, a.cfg.hasToken(), a.cfg.DNS.APIURL,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, a.st.Events,

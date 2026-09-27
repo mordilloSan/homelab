@@ -16,14 +16,15 @@ import (
 
 // fake is the TNAS as the agent sees it: pings, HTTPS checks and commands.
 type fake struct {
-	mu      sync.Mutex
-	cmds    []string        // every command except ping, in order
-	gets    []string        // every URL fetched
-	noPing  map[string]bool // ip → does not answer ping
-	down    map[string]bool // "host@ip" → HTTPS check fails
-	failCmd []string        // command prefixes that fail
-	outs    map[string]string
-	scans   []string // commands run through Output
+	mu       sync.Mutex
+	cmds     []string        // every command except ping, in order
+	gets     []string        // every URL fetched
+	noPing   map[string]bool // ip → does not answer ping
+	down     map[string]bool // "host@ip" → HTTPS check fails
+	failCmd  []string        // command prefixes that fail
+	outs     map[string]string
+	scans    []string // commands run through Output
+	badToken string   // the Technitium refuses this bearer token
 }
 
 func (f *fake) Run(name string, args ...string) error {
@@ -79,10 +80,13 @@ func (f *fake) Check(host, ip string) error {
 	return nil
 }
 
-func (f *fake) Get(u, _ string) ([]byte, error) {
+func (f *fake) Get(u, bearer string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.gets = append(f.gets, u)
+	if bearer != "" && bearer == f.badToken {
+		return []byte(`{"status":"invalid-token","errorMessage":"Invalid token or session expired."}`), nil
+	}
 	return []byte(`{"status":"ok","ok":true}`), nil
 }
 
@@ -180,6 +184,23 @@ func TestRunStops(t *testing.T) {
 	}
 	if _, err := os.Stat(a.statePath); err != nil {
 		t.Fatalf("o tick não acabou: %v", err)
+	}
+}
+
+// DNS turned on in the UI during a failover: the record is added on the next tick.
+func TestDNSOnWhileActive(t *testing.T) {
+	a, f := setup(t)
+	a.cfg.DNS.Enabled = false
+	f.down["bitwarden.engmariz.com@"+srv] = true
+	at := t0
+	tickTo(a, &at, 5)
+	if state(a, "vaultwarden") != Active || hasGet(f, "records/add?") {
+		t.Fatalf("failover sem DNS: estado %s, pedidos %v", state(a, "vaultwarden"), f.gets)
+	}
+	a.cfg.DNS.Enabled = true
+	a.Tick(at)
+	if !a.st.Services["vaultwarden"].DNS || !hasGet(f, "records/add?") || !hasGet(f, "domain=bitwarden.engmariz.com") {
+		t.Fatalf("DNS ligado com o serviço em failover: o registo não foi criado: %v", f.gets)
 	}
 }
 
