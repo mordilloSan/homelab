@@ -74,8 +74,7 @@ type Config struct {
 		PrepullAt string `yaml:"prepull_at"`
 	} `yaml:"nightly"`
 	UI struct {
-		Listen       string `yaml:"listen"`
-		PasswordHash string `yaml:"password_hash"`
+		Listen string `yaml:"listen"` // the login is in user.yml, next to this file
 	} `yaml:"ui"`
 }
 
@@ -147,6 +146,7 @@ func writeAtomic(path string, b []byte) error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
+	chownLikeDir(tmp)
 	return os.Rename(tmp, path)
 }
 
@@ -228,6 +228,8 @@ type Agent struct {
 	pushErr   string
 	beats     map[string][]Beat
 	tnasSeen  bool // last TNAS ping, so a change is logged once
+	userPath  string
+	creds     atomic.Pointer[creds] // read by every request, so outside mu
 }
 
 func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error) {
@@ -246,6 +248,12 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	if a.st.Services == nil {
 		a.st.Services = map[string]*SvcState{}
 	}
+	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
+	c, err := loadUser(a.userPath)
+	if err != nil {
+		return nil, err
+	}
+	a.creds.Store(c)
 	a.publish()
 	return a, nil
 }
@@ -907,6 +915,7 @@ func (a *Agent) publish() {
 	b, _ := json.Marshal(struct {
 		Now              time.Time `json:"now"`
 		Version          string    `json:"version"`
+		DefaultPassword  bool      `json:"default_password"`
 		Mode             string    `json:"mode"`
 		CheckIntervalS   int       `json:"check_interval_s"`
 		StartTimeoutMin  int       `json:"start_timeout_min"`
@@ -934,7 +943,7 @@ func (a *Agent) publish() {
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
 	}{
-		a.now, version, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled,
+		a.now, version, a.creds.Load().Default, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, a.st.Events,

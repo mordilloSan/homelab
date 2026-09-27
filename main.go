@@ -3,16 +3,13 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"path/filepath"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // version is set at build time (-X main.version=v1.2.3) by the release workflow.
@@ -27,27 +24,16 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	if flag.Arg(0) == "hash" { // failover-agent hash < password → bcrypt hash for ui.password_hash
-		pw, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		pw = strings.TrimRight(pw, "\r\n")
-		if len(pw) < 12 {
-			log.Fatal("password com menos de 12 caracteres")
-		}
-		h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(string(h))
-		return
-	}
 
+	if err := firstRun(*cfgPath); err != nil {
+		log.Fatal(err)
+	}
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if cfg.UI.PasswordHash == "" {
-		log.Fatal("ui.password_hash vazio: gera um com `failover-agent hash`")
-	}
+	writeOverrides(&cfg)
+	_ = os.MkdirAll(filepath.Dir(*statePath), 0o755)
 	a, err := NewAgent(cfg, *cfgPath, *statePath, realSys{})
 	if err != nil {
 		log.Fatal(err)

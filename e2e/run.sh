@@ -12,7 +12,7 @@ set -euo pipefail
 cmd=${1:-test}
 here=$(cd "$(dirname "$0")/.." && pwd)
 image=failover-agent-e2e
-pw=e2e-password-longa
+pw="admin" # the default login, created by the agent in user.yml
 W=$here/.e2e
 
 cleanup() {
@@ -28,7 +28,7 @@ cleanup() {
 	rm -rf "$W"
 }
 
-status() { curl -sf -u "x:$pw" http://127.0.0.1:18099/api/status; }
+status() { curl -sf -u "admin:$pw" http://127.0.0.1:18099/api/status; }
 
 # wait_for <jq condition> <timeout s> <description>
 wait_for() {
@@ -150,7 +150,6 @@ exit 1
 EOF
 chmod +x "$W/btrfs"
 
-hash=$(echo "$pw" | docker run --rm -i "$image" hash)
 echo e2e-token >"$W/config/technitium.token"
 cat >"$W/config/failover.yml" <<EOF
 mode: $mode
@@ -165,7 +164,7 @@ npm: {dir: npm, alert_after_min: 1}
 services:
 $svc_config
 dns: {enabled: true, api_url: "http://10.123.2.53:5380", token_file: $W/config/technitium.token, zone: e2e.test, ttl: 60}
-ui: {listen: "127.0.0.1:18099", password_hash: '$hash'}
+ui: {listen: "127.0.0.1:18099"}
 EOF
 
 run_agent() {
@@ -184,7 +183,7 @@ if [[ $cmd == start ]]; then
 	wait_for '.router_ok' 60 "interface a responder"
 	cat <<EOF
 
-Interface: http://localhost:18099  (password: $pw)
+Interface: http://localhost:18099  (admin / $pw)
 Começa em observação: muda para automático na interface para ver o failover a sério.
 make server-down / make server-up simula a falha do servidor · make logs · make stop
 EOF

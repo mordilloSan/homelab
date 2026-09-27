@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // fake is the TNAS as the agent sees it: pings, HTTPS checks and commands.
@@ -103,10 +105,12 @@ const (
 
 var t0 = time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 
+func init() { bcryptCost = bcrypt.MinCost }
+
 // newTestAgent loads the example config, so the shipped file is tested too.
 func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	t.Helper()
-	cfg, err := loadConfig("config/failover.example.yml")
+	cfg, err := loadConfig("config/failover.yml")
 	if err != nil {
 		t.Fatal(err)
 	}

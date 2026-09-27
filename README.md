@@ -7,7 +7,7 @@ Agente em Go que corre no TNAS e passa um serviço do servidor (`.66`) para uma 
 | `agent.go` | Configuração, estado persistente e máquina de estados (um `Tick` por intervalo) |
 | `sys.go` | Efeitos reais: `docker compose`, `btrfs`, `arping`, `ping`, verificações HTTPS com `--resolve` e chamadas HTTP |
 | `web.go`, `index.html`, `inter.woff2` | Interface (HTTP Basic com bcrypt), no estilo da LinuxIO: mesmos tokens, ícones mdi e a fonte Inter (SIL OFL) embutida, sem internet |
-| `config/failover.example.yml` | Configuração comentada |
+| `config/failover.yml` | Configuração por defeito, comentada, e a que vai dentro do binário |
 | `overrides/` | `immich.override.yml` (sem ML) e `unifi.override.yml` (`parent: ovs_eth0`) |
 | `e2e/run.sh` | Teste ponta a ponta com o Docker local |
 
@@ -15,22 +15,21 @@ Agente em Go que corre no TNAS e passa um serviço do servidor (`.66`) para uma 
 
 O TNAS não compila nada. Uma tag `v*` no GitHub (`git tag v0.1.0 && git push --tags`) faz o [release.yml](.github/workflows/release.yml) correr os testes. Depois publica a imagem `ghcr.io/mordillosan/failover-agent` e anexa o binário à release.
 
-No TNAS só são precisos quatro ficheiros em `/Volume1/Docker/failover/`: `docker-compose.yml`, `config/failover.yml` (a partir de [failover.example.yml](config/failover.example.yml)) e os dois overrides em `overrides/`.
+No TNAS basta o [docker-compose.yml](docker-compose.yml) em `/Volume1/Docker/failover/`. No primeiro arranque, o agente cria o que falta:
+- `config/failover.yml`, a partir de [config/failover.yml](config/failover.yml), em modo observe e com o DNS desligado;
+- `config/user.yml`, com o login `admin` / `admin`, guardado só como hash (bcrypt);
+- os overrides do Immich e do UniFi em `overrides/`.
 
 ```bash
 cd /Volume1/Docker/failover
-# o repositório é privado: uma vez, com um token do GitHub com read:packages
-docker login ghcr.io -u mordilloSan
-docker compose pull
-read -rs P && echo "$P" | docker compose run --rm -T failover-agent hash   # → ui.password_hash
-printf '%s\n' '<token do Technitium>' > config/technitium.token && chmod 600 config/technitium.token
-# tokens dos monitores Push do Kuma em kuma.* no failover.yml
-docker compose up -d
+docker compose pull && docker compose up -d
 ```
 
-Para atualizar, cria uma tag nova e faz `docker compose pull && docker compose up -d` no TNAS. `docker compose run --rm failover-agent version` mostra a versão instalada.
+Depois:
+1. entra em `http://192.168.1.249:8099` com `admin` / `admin` e usa **Mudar password**. Enquanto for a por defeito, a interface avisa. A password nova fica só como hash em `config/user.yml` e não aparece em nenhum log;
+2. revê o `config/failover.yml` (tokens do Kuma, DNS) e põe o token do Technitium em `config/technitium.token`.
 
-A interface fica em `http://192.168.1.249:8099`. O utilizador pode ser qualquer um; só conta a password.
+Para atualizar, cria uma tag nova e faz `docker compose pull && docker compose up -d` no TNAS. `docker compose run --rm failover-agent version` mostra a versão instalada.
 
 Antes de ligar, confirma nos composes reais (estão no servidor e não os vi):
 - o serviço de ML do Immich chama-se `immich-machine-learning` e o `immich-server` não depende dele;
@@ -52,7 +51,7 @@ Antes de ligar, confirma nos composes reais (estão no servidor e não os vi):
 make test         # go test -race, ~15 s. Inclui um teste com Docker
 make lint         # gofmt, go vet, shellcheck, shfmt
 make e2e          # ~3 min. Imagem real + Docker real; btrfs trocado por cp/rm
-make start        # demonstração com os 5 serviços (vaultwarden, homepage, speedtest, immich, unifi): http://localhost:18099 (password e2e-password-longa)
+make start        # demonstração com os 5 serviços (vaultwarden, homepage, speedtest, immich, unifi): http://localhost:18099 (admin / admin)
 make server-down  # simula a falha do servidor (server-up para o trazer de volta)
 make logs         # registos do agente
 make stop         # remove tudo o que o start criou

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"net/http"
@@ -36,6 +37,7 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("POST /api/config", a.postConfig)
 	mux.HandleFunc("POST /api/maintenance", a.postMaintenance)
 	mux.HandleFunc("POST /api/action", a.postAction)
+	mux.HandleFunc("POST /api/password", a.postPassword)
 	mux.HandleFunc("POST /api/images", func(w http.ResponseWriter, _ *http.Request) {
 		go a.scanImages()
 		w.WriteHeader(http.StatusAccepted)
@@ -43,14 +45,17 @@ func (a *Agent) Handler() http.Handler {
 	return a.auth(mux)
 }
 
-// auth: HTTP Basic with a bcrypt hash; any user name, only the password counts.
+// auth: HTTP Basic against user.yml.
 func (a *Agent) auth(next http.Handler) http.Handler {
-	hash := []byte(a.cfg.UI.PasswordHash)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, pw, ok := r.BasicAuth()
-		if !ok || bcrypt.CompareHashAndPassword(hash, []byte(pw)) != nil {
+		c := a.creds.Load()
+		user, pw, ok := r.BasicAuth()
+		// both are always checked, so the time taken does not tell which one was wrong
+		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
+		pwOK := bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(pw)) == nil
+		if !ok || !userOK || !pwOK {
 			w.Header().Set("WWW-Authenticate", `Basic realm="failover", charset="UTF-8"`)
-			http.Error(w, "password errada", http.StatusUnauthorized)
+			http.Error(w, "utilizador ou password errados", http.StatusUnauthorized)
 			return
 		}
 		// JSON only: a cross-site form cannot send it without a CORS preflight (CSRF).
@@ -180,4 +185,36 @@ func (a *Agent) postAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "ação impossível no estado "+s.State, http.StatusConflict)
 	}
+}
+
+func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Current string `json:"current"`
+		New     string `json:"new"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	c := a.creds.Load()
+	if bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(req.Current)) != nil {
+		http.Error(w, "a password atual está errada", http.StatusForbidden)
+		return
+	}
+	if len(req.New) < 8 || len(req.New) > 72 { // bcrypt ignores anything past 72 bytes
+		http.Error(w, "a nova password tem de ter entre 8 e 72 caracteres", http.StatusBadRequest)
+		return
+	}
+	n, err := newCreds(c.User, req.New)
+	if err == nil {
+		err = saveUser(a.userPath, n)
+	}
+	if err != nil {
+		http.Error(w, "guardar a password: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.creds.Store(n)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.now = time.Now()
+	a.done(w, "", "password da interface alterada")
 }
