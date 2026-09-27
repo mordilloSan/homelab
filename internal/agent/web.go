@@ -3,6 +3,8 @@ package agent
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"time"
@@ -46,6 +48,9 @@ func (a *Agent) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "private, max-age=604800")
 		_, _ = w.Write(interFont)
 	})
+	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 	root.Handle("/", a.auth(mux))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -53,6 +58,38 @@ func (a *Agent) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		root.ServeHTTP(w, r)
 	})
+}
+
+// UIURL is the address to open the UI at: listen (ui.listen) with host in
+// place of an unspecified address like 0.0.0.0.
+func UIURL(listen, host string) (string, error) {
+	h, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", err
+	}
+	if ip := net.ParseIP(h); h == "" || ip != nil && ip.IsUnspecified() {
+		h = host
+	}
+	return "http://" + net.JoinHostPort(h, port), nil
+}
+
+// Healthcheck asks the UI at listen for /healthz, on loopback when it listens
+// everywhere; the image's HEALTHCHECK runs it as "failover-agent healthcheck".
+func Healthcheck(listen string) error {
+	u, err := UIURL(listen, "127.0.0.1")
+	if err != nil {
+		return err
+	}
+	c := http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get(u + "/healthz")
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -187,7 +224,7 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.New) < 8 || len(req.New) > 72 { // bcrypt ignores anything past 72 bytes
-		http.Error(w, "a nova password tem de ter entre 8 e 72 caracteres", http.StatusBadRequest)
+		http.Error(w, "a nova password tem de ter entre 8 e 72 caracteres (os acentos contam a dobrar)", http.StatusBadRequest)
 		return
 	}
 	n, err := newCreds(c.User, req.New)

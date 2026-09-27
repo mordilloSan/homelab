@@ -105,7 +105,7 @@ const (
 
 var t0 = time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 
-func init() { bcryptCost = bcrypt.MinCost }
+func init() { bcryptCost, loginDelay = bcrypt.MinCost, 0 }
 
 // newTestAgent loads the example config, so the shipped file is tested too.
 func newTestAgent(t *testing.T, dir string, f *fake) *Agent {

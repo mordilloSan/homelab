@@ -27,6 +27,17 @@ func main() {
 		return
 	}
 
+	if flag.Arg(0) == "healthcheck" {
+		cfg, err := agent.LoadConfig(*cfgPath)
+		if err == nil {
+			err = agent.Healthcheck(cfg.UI.Listen)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	agent.Version = version
 	if err := agent.FirstRun(*cfgPath); err != nil {
 		log.Fatal(err)
@@ -43,6 +54,10 @@ func main() {
 	}
 	srv := &http.Server{Addr: cfg.UI.Listen, Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { log.Fatal(srv.ListenAndServe()) }()
-	log.Printf("failover-agent %s em modo %s, interface em %s", version, cfg.Mode, cfg.UI.Listen)
+	ui, err := agent.UIURL(cfg.UI.Listen, cfg.TNASIP)
+	if err != nil {
+		ui = cfg.UI.Listen
+	}
+	log.Printf("failover-agent %s em modo %s, interface em %s", version, cfg.Mode, ui)
 	a.Run()
 }

@@ -20,6 +20,8 @@ const (
 	sessionTTL    = 7 * 24 * time.Hour // renewed on every request, so it only runs out when idle
 )
 
+var loginDelay = time.Second // after a wrong login, to slow down guessing; tests set it to 0
+
 // sessions are kept in memory: a restart of the agent asks for the login again.
 type sessions struct {
 	mu sync.Mutex
@@ -124,7 +126,7 @@ func (a *Agent) postLogin(w http.ResponseWriter, r *http.Request) {
 	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
 	pwOK := bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(pw)) == nil
 	if !userOK || !pwOK {
-		time.Sleep(time.Second) // slows down guessing
+		time.Sleep(loginDelay)
 		http.Redirect(w, r, "/login?erro=1", http.StatusSeeOther)
 		return
 	}

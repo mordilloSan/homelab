@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar · Failover</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232052c2'/%3E%3Cpath fill='%23fff' transform='translate(2.4 2.4) scale(.8)' d='m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z'/%3E%3C/svg%3E">
+<style>
+/* same tokens as index.html (LinuxIO): dark by default, light when asked */
+@font-face { font-family: "Inter Variable"; src: url(inter.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
+:root {
+  color-scheme: dark;
+  --bg: #1b2635; --paper: #233044; --well: rgba(0, 0, 0, .18);
+  --card: rgba(17, 25, 42, .6);
+  --card-gradient: linear-gradient(180deg, rgba(255,255,255,.18) 0%, rgba(255,255,255,.11) 38%, rgba(255,255,255,.08) 100%);
+  --shadow: 0 16px 40px -28px rgba(0, 0, 0, .6);
+  --text: rgba(255, 255, 255, .95); --muted: rgba(255, 255, 255, .56); --divider: rgba(255, 255, 255, .14);
+  --primary: #407ad6; --primary-dark: #2f65cb; --error: #f54b3f;
+}
+@media (prefers-color-scheme: light) {
+  :root { color-scheme: light; --bg: #f7f9fc; --paper: #fff; --well: rgba(0, 0, 0, .035); --card: rgba(255, 255, 255, .82);
+    --card-gradient: linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.98)); --shadow: 0 12px 32px -24px rgba(0, 0, 0, .45);
+    --text: rgba(15, 15, 15, .95); --muted: rgba(15, 15, 15, .62); --divider: rgba(0, 0, 0, .14);
+    --primary: #376fd0; --primary-dark: #2052c2; --error: #cf222e; }
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text);
+  font: 400 13px/1.5 "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+form { width: min(380px, 100%); padding: 28px; border-radius: 16px; background-color: var(--card); background-image: var(--card-gradient);
+  box-shadow: var(--shadow); display: grid; gap: 6px; animation: rise .35s cubic-bezier(.2, .8, .2, 1); }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+.logo { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 26%; color: #fff; margin-bottom: 12px;
+  background: linear-gradient(160deg, #6395e0, var(--primary-dark));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.4), inset 0 -2px 4px rgba(0,0,0,.15), 0 6px 14px -6px rgba(32,82,194,.8); }
+.logo svg { width: 26px; height: 26px; fill: currentColor; }
+h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.sub { margin: 0 0 14px; color: var(--muted); }
+label { margin-top: 8px; color: var(--muted); font-size: 12px; }
+input { width: 100%; padding: 9px 11px; border-radius: 4px; border: 1px solid var(--divider); background: var(--well); color: inherit; font: inherit; font-size: 14px; }
+input:hover { border-color: color-mix(in srgb, var(--text), transparent 60%); }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.err { margin: 8px 0 0; color: var(--error); }
+button { margin-top: 16px; padding: 9px 16px; border: 0; border-radius: 4px; background: var(--primary); color: #fff; font: inherit;
+  font-size: 14px; font-weight: 500; cursor: pointer; text-shadow: 0 1px 1px rgba(0,0,0,.3); }
+button:hover { background: var(--primary-dark); }
+@media (prefers-reduced-motion: reduce) { form { animation: none; } }
+</style>
+</head>
+<body>
+<!-- A plain form post with the standard field names and autocomplete tokens,
+     so password managers (Bitwarden) fill it in and offer to save it. -->
+<form method="post" action="/login" id="login">
+  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
+  <h1>Failover do homelab</h1>
+  <p class="sub">Entra para ver e controlar o failover.</p>
+  <label for="username">Utilizador</label>
+  <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required>
+  <p class="err" id="err" role="alert" hidden>Utilizador ou password errados.</p>
+  <button type="submit">Entrar</button>
+</form>
+<script>
+if (new URLSearchParams(location.search).has('erro')) document.getElementById('err').hidden = false;
+</script>
+</body>
+</html>

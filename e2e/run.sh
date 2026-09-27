@@ -28,7 +28,9 @@ cleanup() {
 	rm -rf "$W"
 }
 
-status() { curl -sf -u "admin:$pw" http://127.0.0.1:18099/api/status; }
+# the UI logs in with a form and a session cookie; a restarted agent forgets the session
+login() { curl -sf -o /dev/null -c "$W/cookies" -d username=admin -d "password=$pw" http://127.0.0.1:18099/login; }
+status() { curl -sf -b "$W/cookies" http://127.0.0.1:18099/api/status || { login && curl -sf -b "$W/cookies" http://127.0.0.1:18099/api/status; }; }
 
 # wait_for <jq condition> <timeout s> <description>
 wait_for() {

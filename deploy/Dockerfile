@@ -11,4 +11,5 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}"
 FROM docker:cli
 RUN apk add --no-cache btrfs-progs iputils-arping iputils-ping tzdata ca-certificates
 COPY --from=build /failover-agent /usr/local/bin/failover-agent
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s CMD ["failover-agent", "healthcheck"]
 ENTRYPOINT ["failover-agent"]
