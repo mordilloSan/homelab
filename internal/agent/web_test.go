@@ -33,7 +33,7 @@ func TestUI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return resp.Header.Get("Location")
 	}
 	do := func(c *http.Client, ctype, path, body string) int {
@@ -47,7 +47,7 @@ func TestUI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return resp.StatusCode
 	}
 

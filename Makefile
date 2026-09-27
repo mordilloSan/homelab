@@ -7,6 +7,7 @@ test:
 lint:
 	test -z "$$(gofmt -l .)"
 	go vet ./...
+	golangci-lint run ./...
 	shellcheck e2e/run.sh
 	shfmt -d e2e/run.sh
 

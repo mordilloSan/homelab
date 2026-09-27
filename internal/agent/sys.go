@@ -63,7 +63,7 @@ func (RealSys) Check(host, ip string) error {
 		return unwrapURL(err)
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
@@ -84,7 +84,7 @@ func (RealSys) Get(u, bearer string) ([]byte, error) {
 	if err != nil {
 		return nil, unwrapURL(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 300 {
 		return body, fmt.Errorf("HTTP %d", resp.StatusCode)

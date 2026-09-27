@@ -85,7 +85,7 @@ func Healthcheck(listen string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
