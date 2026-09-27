@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -30,7 +30,7 @@ func FirstRun(cfgPath string) error {
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		return err
 	}
-	log.Printf("sem %s: criada a configuração por defeito (modo observe, DNS desligado)", cfgPath)
+	slog.Info("sem configuração: criada a por defeito (modo observe, DNS desligado)", "file", cfgPath)
 	return writeAtomic(cfgPath, defaultConfig)
 }
 
@@ -44,7 +44,7 @@ func WriteOverrides(c *Config) {
 		}
 		b, err := defaultOverrides.ReadFile("overrides/" + s.Override)
 		if err != nil {
-			log.Printf("%s: o override %s não existe", s.Name, dst)
+			slog.Warn("o override não existe", "svc", s.Name, "file", dst)
 			continue
 		}
 		err = os.MkdirAll(c.Paths.OverridesDir, 0o755)
@@ -52,10 +52,10 @@ func WriteOverrides(c *Config) {
 			err = writeAtomic(dst, b)
 		}
 		if err != nil {
-			log.Printf("%s: não foi possível criar %s: %v", s.Name, dst, err)
+			slog.Error("não foi possível criar o override", "svc", s.Name, "file", dst, "error", err)
 			continue
 		}
-		log.Printf("%s: criado %s (revê os nomes do serviço e da rede)", s.Name, dst)
+		slog.Info("override criado: revê os nomes do serviço e da rede", "svc", s.Name, "file", dst)
 	}
 }
 
@@ -99,7 +99,7 @@ func loadUser(path string) (*creds, error) {
 		if cerr != nil {
 			return nil, cerr
 		}
-		log.Printf("sem %s: entra com o utilizador e a password por defeito e muda a password na interface", path)
+		slog.Warn("sem utilizador: entra com o utilizador e a password por defeito e muda a password na interface", "file", path)
 		return c, saveUser(path, c)
 	}
 	if err != nil {

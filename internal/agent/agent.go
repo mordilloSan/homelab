@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -335,7 +335,7 @@ func (a *Agent) service(name string) (Service, bool) {
 }
 
 func (a *Agent) event(svc, msg string) {
-	log.Printf("[%s] %s", cmp.Or(svc, "global"), msg)
+	slog.Info(msg, "svc", cmp.Or(svc, "global"))
 	a.st.Events = append(a.st.Events, Event{T: a.now, Svc: svc, Msg: msg})
 	if n := len(a.st.Events); n > maxEvents {
 		a.st.Events = slices.Clone(a.st.Events[n-maxEvents:])
@@ -815,7 +815,7 @@ func (a *Agent) push(token string, up bool, msg string) {
 	if e != a.pushErr {
 		a.pushErr = e
 		if e != "" {
-			log.Printf("kuma: %s", e)
+			slog.Warn("kuma", "error", e)
 		}
 	}
 }
@@ -914,7 +914,7 @@ func (a *Agent) nightly() {
 			}
 		}
 		if err := a.sys.Run("docker", "image", "prune", "-f"); err != nil {
-			log.Printf("docker image prune: %v", err)
+			slog.Warn("docker image prune", "error", err)
 		}
 		a.scanImages()
 		a.mu.Lock()
@@ -933,7 +933,7 @@ func (a *Agent) save() {
 	a.publish()
 	b, _ := json.MarshalIndent(&a.st, "", "  ")
 	if err := writeAtomic(a.statePath, b); err != nil {
-		log.Printf("guardar estado: %v", err)
+		slog.Error("guardar estado", "error", err)
 	}
 }
 

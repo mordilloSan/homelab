@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +25,7 @@ import (
 var version = "dev"
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
@@ -133,19 +134,19 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	if err != nil {
 		ui = cfg.UI.Listen
 	}
-	log.Printf("failover-agent %s em modo %s, interface em %s", version, cfg.Mode, ui)
+	slog.Info("failover-agent a correr", "version", version, "mode", cfg.Mode, "ui", ui)
 	a.Run(ctx)
 
 	shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("parar a interface: %v", err)
+		slog.Warn("parar a interface", "error", err)
 	}
 	select {
 	case err := <-serveErr:
 		return fmt.Errorf("interface: %w", err)
 	default:
-		log.Print("failover-agent parado")
+		slog.Info("failover-agent parado")
 		return nil
 	}
 }
