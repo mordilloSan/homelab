@@ -95,9 +95,9 @@ func newCreds(user, pw string) (*creds, error) {
 func loadUser(path string) (*creds, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		c, err := newCreds(defaultUser, defaultPassword)
-		if err != nil {
-			return nil, err
+		c, cerr := newCreds(defaultUser, defaultPassword)
+		if cerr != nil {
+			return nil, cerr
 		}
 		log.Printf("sem %s: entra com o utilizador e a password por defeito e muda a password na interface", path)
 		return c, saveUser(path, c)

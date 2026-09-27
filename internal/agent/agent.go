@@ -4,6 +4,7 @@ package agent
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,16 +108,22 @@ func (c *Config) validate() error {
 	}
 	seen := map[string]bool{"npm": true}
 	for _, s := range c.Services {
-		if !validName.MatchString(s.Name) || seen[s.Name] || s.Dir == "" || s.Host == "" {
-			return fmt.Errorf("serviço inválido ou repetido: %q", s.Name)
-		}
-		if s.WaitMin < 1 || s.StabilityMin < 0 {
-			return fmt.Errorf("%s: wait_min tem de ser >= 1 e stability_min >= 0", s.Name)
-		}
-		if s.RequireFreeIP != "" && c.LANIface == "" {
-			return fmt.Errorf("%s: require_free_ip precisa de lan_iface", s.Name)
+		if err := c.validateService(s, seen); err != nil {
+			return err
 		}
 		seen[s.Name] = true
+	}
+	return nil
+}
+
+func (c *Config) validateService(s Service, seen map[string]bool) error {
+	switch {
+	case !validName.MatchString(s.Name) || seen[s.Name] || s.Dir == "" || s.Host == "":
+		return fmt.Errorf("serviço inválido ou repetido: %q", s.Name)
+	case s.WaitMin < 1 || s.StabilityMin < 0:
+		return fmt.Errorf("%s: wait_min tem de ser >= 1 e stability_min >= 0", s.Name)
+	case s.RequireFreeIP != "" && c.LANIface == "":
+		return fmt.Errorf("%s: require_free_ip precisa de lan_iface", s.Name)
 	}
 	return nil
 }
@@ -132,7 +139,10 @@ func LoadConfig(path string) (Config, error) {
 	if err := d.Decode(&c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
-	return c, c.validate()
+	if err := c.validate(); err != nil {
+		return c, fmt.Errorf("%s: %w", path, err)
+	}
+	return c, nil
 }
 
 func saveConfig(path string, c *Config) error {
@@ -244,7 +254,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	switch {
 	case err == nil:
 		// A corrupt state would forget running failovers: refuse to start.
-		if err := json.Unmarshal(b, &a.st); err != nil {
+		if err = json.Unmarshal(b, &a.st); err != nil {
 			return nil, fmt.Errorf("estado %s corrompido: %w", statePath, err)
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -263,7 +273,9 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	return a, nil
 }
 
-func (a *Agent) Run() {
+// Run ticks until ctx ends. A tick in progress always finishes: stopping in
+// the middle of a failover would leave a snapshot the state does not know.
+func (a *Agent) Run(ctx context.Context) {
 	for {
 		a.mu.Lock()
 		stale := time.Since(a.st.ImagesAt) > time.Hour
@@ -276,6 +288,8 @@ func (a *Agent) Run() {
 		d := time.Duration(a.cfg.CheckIntervalS) * time.Second
 		a.mu.Unlock()
 		select {
+		case <-ctx.Done():
+			return
 		case <-time.After(d):
 		case <-a.wake:
 		}
@@ -401,7 +415,8 @@ const maxBeats = 40
 
 func (a *Agent) record(p probe) {
 	add := func(name, s string, ms int) {
-		b := append(a.beats[name], Beat{T: a.now, S: s, Ms: ms})
+		b := a.beats[name]
+		b = append(b, Beat{T: a.now, S: s, Ms: ms})
 		a.beats[name] = b[max(0, len(b)-maxBeats):]
 	}
 	status := map[bool]string{true: "up", false: "down"}
@@ -453,28 +468,7 @@ func (a *Agent) evaluate(p probe) {
 		return
 	}
 
-	// R2: the server's NPM first. Down with the server alive is case 2.3:
-	// warn only and leave the services alone (known=false).
-	known := true
-	st.ServerNPMOK, st.ServerUp = p.npmOK, p.npmOK || p.serverPing
-	if st.ServerNPMOK {
-		if st.NPMAlerted {
-			a.event("", "NPM do servidor voltou")
-		}
-		st.NPMFailSince, st.NPMAlerted = time.Time{}, false
-	} else {
-		if st.NPMFailSince.IsZero() {
-			st.NPMFailSince = a.now
-		}
-		if p.serverPing {
-			known = false
-			if !st.NPMAlerted && a.now.Sub(st.NPMFailSince) >= minutes(c.NPM.AlertAfterMin) {
-				st.NPMAlerted = true
-				a.event("", "NPM do servidor em falha com o servidor vivo: só aviso, sem failover")
-			}
-		}
-	}
-
+	known := a.serverNPM(p)
 	for _, sv := range c.Services {
 		a.step(sv, a.svc(sv.Name), known, p.svcOK[sv.Name])
 	}
@@ -483,12 +477,39 @@ func (a *Agent) evaluate(p probe) {
 	}
 }
 
+// serverNPM applies R2: the server's NPM first. Down with the server alive is
+// case 2.3: warn only and leave the services alone (known=false).
+func (a *Agent) serverNPM(p probe) (known bool) {
+	st := &a.st
+	st.ServerNPMOK, st.ServerUp = p.npmOK, p.npmOK || p.serverPing
+	if st.ServerNPMOK {
+		if st.NPMAlerted {
+			a.event("", "NPM do servidor voltou")
+		}
+		st.NPMFailSince, st.NPMAlerted = time.Time{}, false
+		return true
+	}
+	if st.NPMFailSince.IsZero() {
+		st.NPMFailSince = a.now
+	}
+	if !p.serverPing {
+		return true
+	}
+	if !st.NPMAlerted && a.now.Sub(st.NPMFailSince) >= minutes(a.cfg.NPM.AlertAfterMin) {
+		st.NPMAlerted = true
+		a.event("", "NPM do servidor em falha com o servidor vivo: só aviso, sem failover")
+	}
+	return false
+}
+
 func (a *Agent) set(s *SvcState, state string) {
 	s.State, s.Since = state, a.now
 	s.FailSince, s.OKSince, s.Observed, s.Msg = time.Time{}, time.Time{}, false, ""
 }
 
 // step advances one service; known=false means its server side could not be checked.
+//
+//nolint:gocognit // the state machine: one case per state reads better than split up
 func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 	auto := a.cfg.Mode == "auto"
 	if known {
@@ -560,28 +581,8 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 
 func (a *Agent) failover(sv Service, s *SvcState) {
 	c := &a.cfg
-	if s.Snapshot == "" {
-		if ip := sv.RequireFreeIP; ip != "" { // R3
-			if err := a.sys.Run("arping", "-D", "-q", "-c", "2", "-w", "3", "-I", c.LANIface, ip); err != nil {
-				a.fail(sv, s, "IP "+ip+" ocupado, o failover não arranca: "+err.Error())
-				return
-			}
-		}
-		if err := a.ensureNPM(); err != nil {
-			a.fail(sv, s, "NPM do TNAS: "+err.Error())
-			return
-		}
-		snap, err := a.snapshot(sv.Name)
-		if err != nil {
-			a.fail(sv, s, "snapshot: "+err.Error())
-			return
-		}
-		s.Snapshot = snap
-		a.event(sv.Name, "failover iniciado a partir de "+snap)
-		if err := a.compose(sv.Name, a.cfg.files(snap, sv.Dir, sv.Override), "up", "-d"); err != nil {
-			a.fail(sv, s, "compose up: "+err.Error())
-			return
-		}
+	if s.Snapshot == "" && !a.startCopy(sv, s) {
+		return
 	}
 	// R5: the copy is checked through the TNAS NPM; DNS only after it is healthy.
 	err := a.sys.Check(sv.Host, c.TNASIP)
@@ -603,6 +604,33 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 	}
 	a.set(s, Active)
 	a.event(sv.Name, "em failover no TNAS")
+}
+
+// startCopy starts the TNAS NPM and the service from a new snapshot; false
+// means it failed and the service is in ERROR.
+func (a *Agent) startCopy(sv Service, s *SvcState) bool {
+	if ip := sv.RequireFreeIP; ip != "" { // R3
+		if err := a.sys.Run("arping", "-D", "-q", "-c", "2", "-w", "3", "-I", a.cfg.LANIface, ip); err != nil {
+			a.fail(sv, s, "IP "+ip+" ocupado, o failover não arranca: "+err.Error())
+			return false
+		}
+	}
+	if err := a.ensureNPM(); err != nil {
+		a.fail(sv, s, "NPM do TNAS: "+err.Error())
+		return false
+	}
+	snap, err := a.snapshot(sv.Name)
+	if err != nil {
+		a.fail(sv, s, "snapshot: "+err.Error())
+		return false
+	}
+	s.Snapshot = snap
+	a.event(sv.Name, "failover iniciado a partir de "+snap)
+	if err := a.compose(sv.Name, a.cfg.files(snap, sv.Dir, sv.Override), "up", "-d"); err != nil {
+		a.fail(sv, s, "compose up: "+err.Error())
+		return false
+	}
+	return true
 }
 
 func (a *Agent) fail(sv Service, s *SvcState, msg string) {
@@ -885,7 +913,9 @@ func (a *Agent) nightly() {
 				failed = append(failed, j[2]+": "+err.Error())
 			}
 		}
-		_ = a.sys.Run("docker", "image", "prune", "-f")
+		if err := a.sys.Run("docker", "image", "prune", "-f"); err != nil {
+			log.Printf("docker image prune: %v", err)
+		}
 		a.scanImages()
 		a.mu.Lock()
 		defer a.mu.Unlock()

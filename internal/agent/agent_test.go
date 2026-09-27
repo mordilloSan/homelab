@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -121,7 +122,7 @@ func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	cfg.DNS.TokenFile = filepath.Join(dir, "token")
 	cfg.Kuma.HeartbeatToken, cfg.Kuma.NPMToken = "hb", "npmtok"
 	cfg.Kuma.ServiceTokens = map[string]string{"vaultwarden": "vwtok"}
-	if err := os.WriteFile(cfg.DNS.TokenFile, []byte("secret\n"), 0o600); err != nil {
+	if err = os.WriteFile(cfg.DNS.TokenFile, []byte("secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	a, err := NewAgent(cfg, filepath.Join(dir, "failover.yml"), filepath.Join(dir, "state.json"), f)
@@ -162,6 +163,24 @@ func hasGet(f *fake, sub string) bool {
 
 func hasEvent(a *Agent, sub string) bool {
 	return slices.ContainsFunc(a.st.Events, func(e Event) bool { return strings.Contains(e.Msg, sub) })
+}
+
+// A signal (ctx) stops Run after the tick, never in the middle of it.
+func TestRunStops(t *testing.T) {
+	a, _ := setup(t)
+	a.st.ImagesAt = time.Now() // no background scan left running after the test
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run não parou")
+	}
+	if _, err := os.Stat(a.statePath); err != nil {
+		t.Fatalf("o tick não acabou: %v", err)
+	}
 }
 
 // T-14 + T-20 + R1: only vaultwarden fails; failover at 5 min, return after
