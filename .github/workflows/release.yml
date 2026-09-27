@@ -1,0 +1,57 @@
+# Tag v* → tests, then the image on GHCR and the binary on the release.
+# The TNAS only pulls ghcr.io/mordillosan/failover-agent; nothing is built there.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # a manual run publishes the image tagged with the branch, no release
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/mordillosan/failover-agent
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Testes
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+
+      - name: Imagem
+        env:
+          VERSION: ${{ github.ref_name }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          tags=(-t "$IMAGE:$VERSION")
+          if [[ $GITHUB_REF == refs/tags/* ]]; then tags+=(-t "$IMAGE:latest"); fi
+          docker build --build-arg "VERSION=$VERSION" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            "${tags[@]}" .
+          docker push --all-tags "$IMAGE"
+
+      - name: Binário
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+          VERSION: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o failover-agent .
+          sha256sum failover-agent > failover-agent.sha256
+          gh release create "$VERSION" failover-agent failover-agent.sha256 --generate-notes

@@ -1,0 +1,15 @@
+# Em /Volume1/Docker/failover/ no TNAS, fora do espelho.
+services:
+  failover-agent:
+    image: ghcr.io/mordillosan/failover-agent:latest # built by .github/workflows/release.yml
+    container_name: failover-agent
+    restart: unless-stopped
+    network_mode: host             # router, .66, Technitium em localhost, arping
+    privileged: true               # btrfs snapshot/delete e arping; testar se cap_add chega
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Volume1:/Volume1          # MESMO caminho dentro e fora: os binds são resolvidos pelo host
+      - ./config:/config
+      - ./state:/state
+    environment:
+      - TZ=Europe/Lisbon

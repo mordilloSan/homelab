@@ -1,0 +1,5 @@
+# Decisão 7.2: sem machine learning no failover.
+# O nome tem de ser o do serviço no compose do Immich (não o container_name).
+services:
+  immich-machine-learning:
+    profiles: ["disabled"]

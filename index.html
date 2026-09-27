@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failover</title>
+<style>
+/* Tokens follow LinuxIO (frontend/src/theme): dark variant by default, its light variant when asked. */
+@font-face { font-family: "Inter Variable"; src: url(inter.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
+:root {
+  color-scheme: dark;
+  --font: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --bg: #1b2635;
+  --paper: #233044;
+  --card: rgba(17, 25, 42, .6);
+  --card-gradient: linear-gradient(180deg, rgba(255,255,255,.18) 0%, rgba(255,255,255,.14) 18%, rgba(255,255,255,.11) 38%, rgba(255,255,255,.09) 62%, rgba(255,255,255,.08) 100%);
+  --well: rgba(0, 0, 0, .18);
+  --shadow: 0 16px 40px -28px rgba(0, 0, 0, .6);
+  --text: rgba(255, 255, 255, .95);
+  --muted: rgba(255, 255, 255, .56);
+  --divider: rgba(255, 255, 255, .12);
+  --primary: #407ad6;
+  --primary-dark: #2f65cb;
+  --success: #00e676;
+  --warning: #ffc107;
+  --error: #f54b3f;
+  --info: #2196f3;
+  --neutral: #bdbdbd;
+  --radius-card: 16px;
+  --radius-md: 8px;
+  --radius: 4px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f7f9fc; --paper: #fff;
+    --card: rgba(255, 255, 255, .82);
+    --card-gradient: linear-gradient(180deg, rgba(255,255,255,.72) 0%, rgba(255,255,255,.9) 40%, rgba(255,255,255,.98) 100%);
+    --well: rgba(0, 0, 0, .035);
+    --shadow: 0 12px 32px -24px rgba(0, 0, 0, .45);
+    --text: rgba(15, 15, 15, .95); --muted: rgba(15, 15, 15, .62); --divider: rgba(0, 0, 0, .12);
+    --primary: #376fd0; --primary-dark: #2052c2;
+    --success: #1a7f37; --warning: #9a6700; --error: #cf222e; --info: #0969da; --neutral: #616161;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-tap-highlight-color: transparent; }
+body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased; font-feature-settings: "cv11", "ss01"; }
+button, input { font: inherit; color: inherit; }
+h1, h2, h3, p { margin: 0; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.icon { width: 18px; height: 18px; flex: none; fill: currentColor; }
+[hidden] { display: none !important; }
+
+main { max-width: 1680px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 20px; }
+
+.card { position: relative; border-radius: var(--radius-card); background-color: var(--card); background-image: var(--card-gradient);
+  box-shadow: var(--shadow); padding: 20px; border: 1px solid transparent; }
+.card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.card-head h2 { font-size: 16px; font-weight: 600; }
+.card-head .spacer { flex: 1; }
+
+/* chips: one colour (--c), mixed toward transparent, like LinuxIO's soft AppChip */
+.chip { --c: var(--muted); display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c), transparent 67%); background: color-mix(in srgb, var(--c), transparent 87%);
+  color: var(--c); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.chip.xs { height: 20px; padding: 0 7px; font-size: 11px; }
+/* all is well: say it quietly, colour is kept for what needs attention */
+.chip.quiet { border-color: transparent; background: none; color: var(--muted); font-weight: 500; padding: 0 2px; }
+.chip.quiet .dot { background: var(--c); }
+.chip .dot, .live .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.busy .dot { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+
+.btn { --b: var(--primary); display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--b), transparent 50%); background: transparent; color: var(--b);
+  font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.btn:hover { border-color: var(--b); background: color-mix(in srgb, var(--b), transparent 92%); }
+.btn .icon { width: 16px; height: 16px; }
+.btn.contained { background: var(--primary); border-color: var(--primary); color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.3); }
+.btn.contained:hover { background: var(--primary-dark); }
+.btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
+.btn.danger { --b: var(--warning); }
+.btn.busy { opacity: .8; }
+.btn .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.btn.busy .dot { animation: pulse 1.4s ease-in-out infinite; }
+
+.switch { appearance: none; margin: 0; position: relative; width: 34px; height: 20px; flex: none; border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--text), transparent 78%); transition: background-color .15s; }
+.switch::before { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+.switch:checked { background: var(--warning); }
+.switch:checked::before { transform: translateX(14px); }
+.toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+
+input[type=number] { width: 72px; padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--divider);
+  background: var(--well); font-variant-numeric: tabular-nums; }
+input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transparent 60%); }
+
+/* header */
+.top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+.logo { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 26%; color: #fff;
+  background: linear-gradient(160deg, #6395e0, var(--primary-dark));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.4), inset 0 -2px 4px rgba(0,0,0,.15), 0 6px 14px -6px rgba(32,82,194,.8); }
+.logo .icon { width: 24px; height: 24px; }
+.brand h1 { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.brand p { font-size: 12px; }
+.top-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.live .dot { background: var(--success); }
+.live.stale .dot { background: var(--error); }
+
+.banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--c), transparent 60%); background: color-mix(in srgb, var(--c), transparent 88%); }
+.banner .icon { color: var(--c); margin-top: 1px; }
+
+/* the topology: where every service is running right now */
+.topo { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 180px) minmax(0, 1fr);
+  grid-template-areas: ". clients ." "server lane tnas"; row-gap: 48px; align-items: stretch; }
+#nodeServer { grid-area: server; } #nodeTnas { grid-area: tnas; } #lane { grid-area: lane; }
+.clients { grid-area: clients; justify-self: center; position: relative; z-index: 1; display: flex; align-items: center; gap: 10px;
+  padding: 7px 16px 7px 7px; border-radius: 999px; background: var(--paper); border: 1px solid var(--divider); box-shadow: var(--shadow); white-space: nowrap; }
+.clients .node-icon { width: 32px; height: 32px; border-radius: 50%; }
+.clients .node-icon .icon { width: 18px; height: 18px; }
+.clients strong { font-weight: 600; }
+.clients small { display: block; color: var(--muted); font-size: 11.5px; }
+/* the wires from the clients; packets travel along the ones carrying traffic */
+.wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.wire { fill: none; stroke: var(--divider); stroke-width: 2; }
+.wire.on { stroke: color-mix(in srgb, var(--wc), transparent 50%); stroke-dasharray: 6 8; animation: wire 1s linear infinite; }
+@keyframes wire { to { stroke-dashoffset: -14; } }
+.pkt { fill: var(--wc); filter: drop-shadow(0 0 4px var(--wc)); }
+.node, .lane { position: relative; z-index: 1; }
+.probe { position: absolute; left: 0; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--pc);
+  box-shadow: 0 0 12px 3px color-mix(in srgb, var(--pc), transparent 40%); pointer-events: none; }
+.lane-label { position: absolute !important; top: calc(50% + 24px); color: var(--muted); font-size: 11px; white-space: nowrap; }
+/* heartbeat bars, like Uptime Kuma's: one per check, newest on the right */
+.beats { display: flex; gap: 2px; height: 22px; align-items: stretch; }
+.beat { flex: 1; min-width: 2px; border-radius: 3px; background: color-mix(in srgb, var(--text), transparent 92%); transform-origin: bottom; }
+.beat.up { background: color-mix(in srgb, var(--success), transparent 25%); } .beat.down { background: var(--error); }
+.beat.unknown { background: color-mix(in srgb, var(--neutral), transparent 55%); }
+.beat.new { animation: beat-in .5s cubic-bezier(.2, .8, .2, 1); }
+@keyframes beat-in { from { transform: scaleY(0); opacity: 0; } }
+.beats-foot { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.node-beats .beats { height: 16px; }
+.ring { width: 14px; height: 14px; border-radius: 50%; flex: none;
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--c), transparent 75%) 0);
+  -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px); mask: radial-gradient(circle, transparent 3.5px, #000 4px); }
+.live.ping .dot { animation: live-ping .9s ease-out; }
+@keyframes live-ping { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success), transparent 20%); } to { box-shadow: 0 0 0 7px transparent; } }
+.node { border-radius: 12px; background: var(--well); padding: 16px; display: grid; gap: 12px; align-content: start;
+  border: 1px solid var(--divider); transition: border-color .5s, box-shadow .5s, background-color .15s; }
+.node:has(.node-head:hover) { background: color-mix(in srgb, var(--text), transparent 95%); }
+.node.lit { border-color: color-mix(in srgb, var(--info), transparent 50%); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info), transparent 88%); }
+.node-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 0; border: 0; border-radius: 8px;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.node-id { display: grid; min-width: 0; }
+.more { width: 18px; height: 18px; color: var(--muted); transition: transform .15s, color .15s; }
+.node-head:hover .more, .svc-open:hover .more { transform: translateX(2px); color: var(--text); }
+.node-meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.node-meta .icon { width: 15px; height: 15px; }
+.node-meta.warn { color: var(--warning); }
+.node-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px;
+  background: color-mix(in srgb, var(--text), transparent 90%); }
+.node-icon .icon { width: 22px; height: 22px; }
+/* the machine's state, breathing: green up, amber degraded, red down, grey unknown */
+.node-icon.st { --sc: var(--neutral); color: var(--sc); background: color-mix(in srgb, var(--sc), transparent 82%);
+  transition: color .4s, background-color .4s; }
+.node-icon.st-up { --sc: var(--success); animation: halo 2.8s ease-out infinite, glow 2.8s ease-in-out infinite; }
+.node-icon.st-warn { --sc: var(--warning); animation: halo 1.6s ease-out infinite, glow 1.6s ease-in-out infinite; }
+.node-icon.st-down { --sc: var(--error); animation: halo 1s ease-out infinite, glow 1s ease-in-out infinite; }
+@keyframes halo { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc), transparent 50%); } 70%, to { box-shadow: 0 0 0 8px transparent; } }
+@keyframes glow { 50% { background-color: color-mix(in srgb, var(--sc), transparent 68%); } }
+.node-title { font-size: 15px; font-weight: 600; }
+.node-head .chip { margin-left: auto; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px; align-items: center; }
+.pill { --c: var(--success); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 9px; border-radius: 999px;
+  font: inherit; font-weight: 550; color: inherit; cursor: pointer; border: 1px solid color-mix(in srgb, var(--c), transparent 62%);
+  background: color-mix(in srgb, var(--c), transparent 88%); transition: background-color .15s; }
+/* the state colour goes on the icon (and ring/dot) only; the pill itself stays neutral */
+.pill, .pill.quiet { border-color: var(--divider); background: color-mix(in srgb, var(--text), transparent 95%); }
+.pill:hover { background: color-mix(in srgb, var(--text), transparent 90%); }
+.pill .icon { width: 16px; height: 16px; color: var(--c); }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.empty { color: var(--muted); font-size: 12.5px; }
+.lane { position: relative; display: grid; place-items: center; align-content: center; gap: 8px; padding: 12px 8px; }
+/* the link between the two: still while everything is on the server; while
+   traffic goes to the TNAS the dashes flow and a packet travels along them */
+.flow { --fc: var(--info); position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px;
+  background: repeating-linear-gradient(90deg, var(--divider) 0 6px, transparent 6px 12px); }
+.lane.active .flow { background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
+  animation: flow .8s linear infinite; }
+.lane.moving .flow { --fc: var(--warning); }
+.flow::after { content: ""; position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; opacity: 0;
+  background: var(--fc); box-shadow: 0 0 10px 2px color-mix(in srgb, var(--fc), transparent 40%); }
+.lane.active .flow::after { opacity: 1; animation: packet 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
+.lane.back .flow, .lane.back .flow::after { animation-direction: reverse; }
+@keyframes flow { to { background-position: 12px 0; } }
+@keyframes packet { from { left: 0; } to { left: calc(100% - 8px); } }
+.lane > :not(.flow, .probe, .lane-label) { position: relative; }
+.lane-arrow { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--paper);
+  border: 1px solid var(--divider); color: var(--muted); }
+.lane.moving .lane-arrow { color: var(--warning); border-color: color-mix(in srgb, var(--warning), transparent 50%); }
+.hero-foot { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--divider); }
+.hero-foot .router { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
+.duration { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+
+/* services */
+.section-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 4px -4px; }
+.section-head h2 { font-size: 16px; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.svc { --accent: var(--success); display: grid; gap: 14px; align-content: start; padding-bottom: 16px;
+  border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 16px; }
+.svc.alert { border-bottom-color: var(--accent); }
+.svc-head { display: flex; align-items: flex-start; gap: 12px; }
+.svc-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 26%; flex: none; color: var(--accent);
+  background: color-mix(in srgb, var(--accent), transparent 86%); }
+.svc-icon .icon { width: 22px; height: 22px; }
+.svc-id { min-width: 0; flex: 1; }
+.svc-id h3 { font-size: 15px; font-weight: 600; }
+.svc-open { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: inherit;
+  font: inherit; cursor: pointer; }
+.svc-open:hover { color: var(--primary); }
+.meta dd.warn { color: var(--warning); }
+.svc-id .mono { color: var(--muted); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { display: grid; gap: 8px; }
+.status p { color: var(--text); }
+.status.tone-error p { color: var(--error); }
+.bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text), transparent 90%); overflow: hidden; }
+.bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .6s ease; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; }
+.meta div { display: grid; }
+.meta dt { color: var(--muted); font-size: 11.5px; }
+.meta dd { margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; }
+.snap { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-md); background: var(--well); min-width: 0; }
+.snap .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snap .icon { width: 16px; height: 16px; color: var(--muted); }
+.svc-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding-top: 12px; border-top: 1px solid var(--divider); }
+
+/* rules + events */
+.lower { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 0; padding: 0; margin: 0 0 16px; }
+.seg legend { color: var(--muted); font-size: 12px; margin-bottom: 6px; padding: 0; }
+.seg label { display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--divider);
+  background: var(--well); cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg strong { font-weight: 600; }
+.seg small { color: var(--muted); font-size: 12px; }
+.seg label:has(input:checked) { border-color: var(--primary); background: color-mix(in srgb, var(--primary), transparent 85%); }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.field { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+table.rules { width: 100%; border-collapse: collapse; }
+.rules th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 8px 8px 0; }
+.rules td { padding: 8px 8px 8px 0; border-top: 1px solid var(--divider); }
+.rules td:first-child { font-weight: 550; }
+.unit { color: var(--muted); margin-left: 6px; }
+.form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 16px; }
+.form-foot .note { margin-right: auto; color: var(--warning); font-size: 12px; }
+
+.timeline { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow-y: auto; }
+.ev { --c: var(--neutral); display: grid; grid-template-columns: 14px 1fr; gap: 12px; padding: 10px 0; }
+.ev + .ev { border-top: 1px solid var(--divider); }
+.ev-dot { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c), transparent 80%); }
+.ev-meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.ev { border-radius: 8px; }
+.ev.fresh { animation: fresh 2s ease-out; }
+@keyframes fresh { from { background: color-mix(in srgb, var(--c), transparent 82%); transform: translateY(-6px); } 30% { transform: none; } }
+
+/* dialog and toasts */
+dialog { width: min(440px, calc(100vw - 32px)); padding: 24px; border-radius: var(--radius-card); color: var(--text);
+  background: var(--paper); border: 1px solid rgba(255,255,255,.2);
+  box-shadow: 0 0 10px rgba(255,255,255,.18), 0 0 20px rgba(255,255,255,.1), 0 24px 48px -12px rgba(0,0,0,.6); }
+dialog::backdrop { background: rgba(0, 0, 0, .5); }
+dialog h2 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+dialog p { color: var(--muted); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 10; }
+.toast { --c: var(--success); display: flex; gap: 10px; align-items: center; max-width: 380px; padding: 10px 14px;
+  border-radius: var(--radius-md); background: var(--paper); border: 1px solid color-mix(in srgb, var(--c), transparent 55%);
+  box-shadow: 0 6px 16px -8px rgba(0,0,0,.5); }
+.toast .icon { color: var(--c); }
+.toast { animation: toast-in .25s cubic-bezier(.2, .8, .2, 1); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* details sheet */
+dialog.sheet { margin: 0 0 0 auto; width: min(580px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; padding: 0;
+  border-radius: var(--radius-card) 0 0 var(--radius-card); border-right: 0; }
+dialog.sheet[open] { animation: sheet-in .32s cubic-bezier(.2, .8, .2, 1); }
+dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
+@keyframes sheet-in { from { transform: translateX(56px); opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; } }
+.sheet-inner { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+.sheet-head { display: flex; align-items: center; gap: 12px; padding: 20px 16px 16px 20px; border-bottom: 1px solid var(--divider); }
+.sheet-title { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.sheet-title h2 { margin: 0; font-size: 17px; }
+.sheet-title .chip { margin-left: auto; }
+.sheet-body { overflow-y: auto; padding: 0 20px 28px; }
+.sheet-body p { color: var(--text); }
+.sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 14px 20px; border-top: 1px solid var(--divider); }
+.icon-btn { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; border: 0;
+  background: none; color: var(--muted); cursor: pointer; }
+.icon-btn:hover { background: color-mix(in srgb, var(--text), transparent 90%); color: var(--text); }
+.sec { padding-top: 20px; }
+.sec h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.sec-head h3 { margin: 0; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--divider); }
+.list li:first-child { border-top: 0; }
+.list .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .icon { width: 16px; height: 16px; }
+.list .side { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stack { margin-top: 14px; }
+.stack-name { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 2px; }
+.stack-name .icon { width: 16px; height: 16px; color: var(--muted); }
+.ok-text { color: var(--success); } .bad-text { color: var(--error); } .warn-text { color: var(--warning); }
+.note-text { color: var(--muted) !important; font-size: 12.5px; margin-top: 8px; }
+
+@media (max-width: 860px) {
+  .lower { grid-template-columns: 1fr; }
+  .topo { grid-template-columns: 1fr; grid-template-areas: "clients" "server" "lane" "tnas"; row-gap: 0; }
+  .wires { display: none; }
+  .clients { margin-bottom: 14px; }
+  .probe { left: 50%; top: 0; }
+  .lane-label { top: auto; left: calc(50% + 26px); }
+  .lane { padding: 14px 0; }
+  .flow { left: 50%; right: auto; top: 0; bottom: 0; width: 2px; height: auto; margin: 0 0 0 -1px;
+    background: repeating-linear-gradient(180deg, var(--divider) 0 6px, transparent 6px 12px); }
+  .lane.active .flow { background-image: repeating-linear-gradient(180deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
+    animation-name: flow-v; }
+  .flow::after { top: 0; left: -3px; }
+  .lane.active .flow::after { animation-name: packet-v; }
+  @keyframes flow-v { to { background-position: 0 12px; } }
+  @keyframes packet-v { from { top: 0; } to { top: calc(100% - 8px); } }
+  dialog.sheet { border-radius: 0; }
+  .lane-arrow .icon { transform: rotate(90deg); }
+}
+@media (max-width: 420px) { .grid { grid-template-columns: 1fr; } .seg { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" data-icon="swap"></span>
+      <div><h1>Failover do homelab</h1><p class="muted" id="subtitle">Servidor e TNAS</p></div>
+    </div>
+    <div class="top-meta">
+      <span class="chip" id="modeChip"></span>
+      <span class="chip" id="dnsChip"></span>
+      <span class="live" id="live"><span class="dot"></span><span id="liveText">A ligar ao agente…</span></span>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden><span data-icon="alert"></span><div id="bannerText"></div></div>
+
+  <section class="card" aria-label="Onde está cada serviço">
+    <div class="topo" id="topo">
+      <svg class="wires" id="wires" aria-hidden="true"></svg>
+      <div class="clients" id="clients"></div>
+      <div class="node" id="nodeServer"></div>
+      <div class="lane" id="lane"></div>
+      <div class="node" id="nodeTnas"></div>
+    </div>
+    <div class="hero-foot">
+      <span class="router" id="router"></span>
+      <label class="toggle"><input type="checkbox" role="switch" class="switch" id="maintGlobal"> <span id="maintGlobalText">Manutenção global</span></label>
+      <label class="duration">durante <input type="number" id="maintMin" min="1" max="10080" value="60"> min</label>
+    </div>
+  </section>
+
+  <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span></div>
+  <div class="grid" id="svcs"></div>
+
+  <div class="lower">
+    <section class="card" aria-labelledby="rulesTitle">
+      <div class="card-head"><h2 id="rulesTitle">Regras</h2></div>
+      <form id="cfg" autocomplete="off">
+        <fieldset class="seg">
+          <legend>Modo</legend>
+          <label><input type="radio" name="mode" value="observe"><strong>Observação</strong><small>Só regista o que faria</small></label>
+          <label><input type="radio" name="mode" value="auto"><strong>Automático</strong><small>Faz failover e regresso sozinho</small></label>
+        </fieldset>
+        <label class="field">Verificar a cada <input type="number" id="interval" min="10"> segundos</label>
+        <table class="rules">
+          <thead><tr><th>Serviço</th><th>Espera antes do failover</th><th>Estabilidade antes do regresso</th></tr></thead>
+          <tbody id="cfgSvcs"></tbody>
+        </table>
+        <div class="form-foot">
+          <span class="note" id="dirty" hidden>Alterações por guardar</span>
+          <button type="button" class="btn" id="reset">Repor</button>
+          <button type="submit" class="btn contained" id="save" disabled>Guardar alterações</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="eventsTitle">
+      <div class="card-head"><h2 id="eventsTitle">Eventos</h2><span class="spacer"></span><span class="muted" id="evCount"></span></div>
+      <ol class="timeline" id="events"></ol>
+    </section>
+  </div>
+</main>
+
+<dialog id="confirm">
+  <form method="dialog">
+    <h2 id="dlgTitle"></h2>
+    <p id="dlgBody"></p>
+    <div class="dlg-foot">
+      <button class="btn" value="cancel">Cancelar</button>
+      <button class="btn contained" value="ok" id="dlgOk"></button>
+    </div>
+  </form>
+</dialog>
+<dialog id="panel" class="sheet" aria-labelledby="panelTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><div class="sheet-title" id="panelHead"></div>
+      <button class="icon-btn" id="panelClose" aria-label="Fechar" data-icon="close"></button></div>
+    <div class="sheet-body" id="panelBody"></div>
+    <div class="sheet-foot" id="panelFoot" hidden></div>
+  </div>
+</dialog>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+// mdi icons, the set LinuxIO uses (@iconify-json/mdi)
+const ICONS = {"server":"M4 1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1M9 5h1V3H9zm0 8h1v-2H9zm0 8h1v-2H9zM5 3v2h2V3zm0 8v2h2v-2zm0 8v2h2v-2z","nas":"M4 5c-1.11 0-2 .89-2 2v10c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V7c0-1.11-.89-2-2-2zm.5 2a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h13v10H7zm1 1v8h3V8zm4 0v8h3V8zm4 0v8h3V8zM9 9h1v1H9zm4 0h1v1h-1zm4 0h1v1h-1z","router":"M5 9c-1.1 0-2 .9-2 2v4a2 2 0 0 0 2 2h6v2h-1c-.55 0-1 .45-1 1H2v2h7c0 .55.45 1 1 1h4c.55 0 1-.45 1-1h7v-2h-7c0-.55-.45-1-1-1h-1v-2h6c1.11 0 2-.89 2-2v-4a2 2 0 0 0-2-2zm1 3h2v2H6zm3.5 0h2v2h-2zm3.5 0h2v2h-2z","shield":"M21 11c0 5.55-3.84 10.74-9 12c-5.16-1.26-9-6.45-9-12V5l9-4l9 4zm-9 10c3.75-1 7-5.46 7-9.78V6.3l-7-3.12L5 6.3v4.92C5 15.54 8.25 20 12 21m2.8-10V9.5C14.8 8.1 13.4 7 12 7S9.2 8.1 9.2 9.5V11c-.6 0-1.2.6-1.2 1.2v3.5c0 .7.6 1.3 1.2 1.3h5.5c.7 0 1.3-.6 1.3-1.2v-3.5c0-.7-.6-1.3-1.2-1.3m-1.3 0h-3V9.5c0-.8.7-1.3 1.5-1.3s1.5.5 1.5 1.3z","images":"M21 17H7V3h14m0-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2M3 5H1v16a2 2 0 0 0 2 2h16v-2H3m12.96-10.71l-2.75 3.54l-1.96-2.36L8.5 15h11z","speed":"M12 16a3 3 0 0 1-3-3c0-1.12.61-2.1 1.5-2.61l9.71-5.62l-5.53 9.58c-.5.98-1.51 1.65-2.68 1.65m0-13c1.81 0 3.5.5 4.97 1.32l-2.1 1.21C14 5.19 13 5 12 5a8 8 0 0 0-8 8c0 2.21.89 4.21 2.34 5.65h.01c.39.39.39 1.02 0 1.41s-1.03.39-1.42.01A9.97 9.97 0 0 1 2 13A10 10 0 0 1 12 3m10 10c0 2.76-1.12 5.26-2.93 7.07c-.39.38-1.02.38-1.41-.01a.996.996 0 0 1 0-1.41A7.95 7.95 0 0 0 20 13c0-1-.19-2-.54-2.9L20.67 8C21.5 9.5 22 11.18 22 13","dashboard":"M19 5v2h-4V5zM9 5v6H5V5zm10 8v6h-4v-6zM9 17v2H5v-2zM21 3h-8v6h8zM11 3H3v10h8zm10 8h-8v10h8zm-10 4H3v6h8z","ap":"M4.93 4.93A9.97 9.97 0 0 0 2 12c0 2.76 1.12 5.26 2.93 7.07l1.41-1.41A7.94 7.94 0 0 1 4 12c0-2.21.89-4.22 2.34-5.66zm14.14 0l-1.41 1.41A7.96 7.96 0 0 1 20 12c0 2.22-.89 4.22-2.34 5.66l1.41 1.41A9.97 9.97 0 0 0 22 12c0-2.76-1.12-5.26-2.93-7.07M7.76 7.76A5.98 5.98 0 0 0 6 12c0 1.65.67 3.15 1.76 4.24l1.41-1.41A4 4 0 0 1 8 12c0-1.11.45-2.11 1.17-2.83zm8.48 0l-1.41 1.41A4 4 0 0 1 16 12c0 1.11-.45 2.11-1.17 2.83l1.41 1.41A5.98 5.98 0 0 0 18 12c0-1.65-.67-3.15-1.76-4.24M12 10a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cube":"M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.99.99 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88zM12 4.15L6.04 7.5L12 10.85l5.96-3.35zM5 15.91l6 3.38v-6.71L5 9.21zm14 0v-6.7l-6 3.37v6.71z","swap":"m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z","wrench":"m22.61 19l-9.08-9.09c.93-2.34.47-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.5L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.39-.4.39-1.01 0-1.4m-3 1.59l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24L7.24 3c1.26-.05 2.49.39 3.44 1.33a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.46 9.45z","alert":"M11 15h2v2h-2zm0-8h2v6h-2zm1-5C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 18a8 8 0 0 1-8-8a8 8 0 0 1 8-8a8 8 0 0 1 8 8a8 8 0 0 1-8 8","check":"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z","restore":"M12 3a9 9 0 0 0-9 9H0l4 4l4-4H5a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7c-1.5 0-2.91-.5-4.06-1.3L6.5 19.14A9.1 9.1 0 0 0 12 21a9 9 0 0 0 9-9a9 9 0 0 0-9-9m2 9a2 2 0 0 0-2-2a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2","layers":"m12 18.54l7.37-5.74L21 14.07l-9 7l-9-7l1.62-1.26zM12 16L3 9l9-7l9 7zm0-11.47L6.26 9L12 13.47L17.74 9z","arrow":"M4 11v2h12l-5.5 5.5l1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5L16 11z","close":"M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z","docker":"M21.81 10.25c-.06-.04-.56-.43-1.64-.43c-.28 0-.56.03-.84.08c-.21-1.4-1.38-2.11-1.43-2.14l-.29-.17l-.18.27c-.24.36-.43.77-.51 1.19c-.2.8-.08 1.56.33 2.21c-.49.28-1.29.35-1.46.35H2.62c-.34 0-.62.28-.62.63c0 1.15.18 2.3.58 3.38c.45 1.19 1.13 2.07 2 2.61c.98.6 2.59.94 4.42.94c.79 0 1.61-.07 2.42-.22c1.12-.2 2.2-.59 3.19-1.16A8.3 8.3 0 0 0 16.78 16c1.05-1.17 1.67-2.5 2.12-3.65h.19c1.14 0 1.85-.46 2.24-.85c.26-.24.45-.53.59-.87l.08-.24zm-17.96.99h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H3.85c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.43 0h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H6.28c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.47 0h1.75c.1 0 .17-.07.17-.16V9.5c0-.08-.06-.16-.17-.16H8.75c-.08 0-.15.07-.15.16v1.58c0 .09.06.16.15.16m2.44 0h1.77c.08 0 .15-.07.15-.16V9.5c0-.08-.06-.16-.15-.16h-1.77c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16M6.28 9h1.76c.08 0 .16-.09.16-.18V7.25c0-.09-.07-.16-.16-.16H6.28c-.09 0-.16.06-.16.16v1.57c.01.09.07.18.16.18m2.47 0h1.75c.1 0 .17-.09.17-.18V7.25c0-.09-.06-.16-.17-.16H8.75c-.08 0-.15.06-.15.16v1.57c0 .09.06.18.15.18m2.44 0h1.77c.08 0 .15-.09.15-.18V7.25c0-.09-.07-.16-.15-.16h-1.77c-.08 0-.15.06-.15.16v1.57c0 .09.07.18.15.18m0-2.28h1.77c.08 0 .15-.07.15-.16V5c0-.1-.07-.17-.15-.17h-1.77c-.08 0-.15.06-.15.17v1.56c0 .08.07.16.15.16m2.46 4.52h1.76c.09 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16h-1.76c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16","chevron":"M8.59 16.58L13.17 12L8.59 7.41L10 6l6 6l-6 6z","clock":"M12 20a8 8 0 0 0 8-8a8 8 0 0 0-8-8a8 8 0 0 0-8 8a8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10a10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67l-.75 1.23L11 13V7z","refresh":"M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8a8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6a6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z","dns":"M7 9a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1M7 19a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1","devices":"M3 6h18V4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3zm10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.34 1-2.22s-.39-1.67-1-2.22zm-2 5.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5s1.5.67 1.5 1.5s-.67 1.5-1.5 1.5M22 8h-6c-.5 0-1 .5-1 1v10c0 .5.5 1 1 1h6c.5 0 1-.5 1-1V9c0-.5-.5-1-1-1m-1 10h-4v-8h4z"};
+const SVC_ICON = {vaultwarden: 'shield', homepage: 'dashboard', speedtest: 'speed', immich: 'images', unifi: 'ap', npm: 'dns'};
+const STATES = {
+  NORMAL: {label: 'No servidor', c: 'var(--success)'},
+  FAILING_OVER: {label: 'Failover em curso', c: 'var(--warning)', busy: true},
+  ACTIVE: {label: 'No TNAS', c: 'var(--info)'},
+  RETURNING: {label: 'A regressar', c: 'var(--warning)', busy: true},
+  ERROR: {label: 'Erro', c: 'var(--error)'},
+};
+const EASE = 'cubic-bezier(.2, .8, .2, 1)';
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+// A service still in NORMAL but failing on the server is shown as failing everywhere.
+const look = s => s.state === 'NORMAL' && st.router_ok && !s.server_ok
+  ? {label: 'Em falha', c: 'var(--warning)'} : STATES[s.state] || STATES.ERROR;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name] || ICONS.cube}"/></svg>`;
+const minsSince = t => (Date.now() - Date.parse(t)) / 60000;
+const dur = m => {
+  if (m < 1) return 'menos de 1 min';
+  m = Math.round(m);
+  if (m < 60) return `${m} min`;
+  if (m < 48 * 60) return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  return `${Math.round(m / 1440)} dias`;
+};
+const ago = t => t ? `há ${dur(minsSince(t))}` : '';
+const clock = t => new Date(t).toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+const when = t => new Date(t).toLocaleString('pt-PT');
+const day = t => new Date(t).toLocaleDateString('pt-PT');
+const bytes = n => n >= 1e9 ? `${(n / 1e9).toLocaleString('pt-PT', {maximumFractionDigits: 1})} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+const sentence = s => s ? cap(s) + (/[.!?]$/.test(s) ? '' : '.') : '';
+const chip = (label, c, cls = '') => `<span class="chip ${cls}" style="--c:${c}">${/busy|quiet/.test(cls) ? '<span class="dot"></span>' : ''}${esc(label)}</span>`;
+// healthy on the server: nothing to look at
+const fine = s => s.state === 'NORMAL' && s.server_ok && st.router_ok;
+const mono = s => `<span class="mono">${esc(s)}</span>`;
+const kv = rows => `<dl class="kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+const sec = (title, html, side = '') => `<section class="sec"><div class="sec-head"><h3>${esc(title)}</h3>${side}</div>${html}</section>`;
+
+let st = null, lastOk = 0;
+// Requests in flight, by control: key → the value the user asked for. The
+// agent may take a while to answer (it waits for a compose up to finish), so
+// controls show what was asked for, disabled, until the answer arrives.
+const pending = new Map();
+const painted = {};
+// Only touch the DOM when the markup changed, so focus and hover survive the 5 s refresh.
+const paint = (id, html) => { if (painted[id] !== html) { painted[id] = html; $(id).innerHTML = html; } };
+
+document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
+
+// What the card says under the name: the one thing worth knowing about the service now.
+function describe(s) {
+  const maint = st.maint_until || s.maint_until;
+  switch (s.state) {
+    case 'NORMAL': {
+      if (!st.router_ok) return {text: 'Sem verificação enquanto o router não responder.'};
+      if (s.server_ok) return {text: 'A responder no servidor.'};
+      if (maint) return {text: 'Em falha no servidor. A manutenção impede o failover.', tone: 'warning'};
+      if (!s.fail_since) return {text: 'Em falha no servidor.', tone: 'warning'};
+      const e = minsSince(s.fail_since), left = s.wait_min - e;
+      if (left > 0) return {text: `Em falha no servidor há ${dur(e)}. O failover começa daqui a ${dur(left)}.`, pct: e / s.wait_min, tone: 'warning'};
+      return {text: st.mode === 'auto' ? 'Em falha no servidor. O failover começa na próxima verificação.'
+        : `Em falha há ${dur(e)}. Em modo automático o failover já teria começado.`, pct: 1, tone: 'warning'};
+    }
+    case 'FAILING_OVER':
+      return {text: sentence(s.msg) || 'A arrancar a cópia no TNAS.', pct: minsSince(s.since) / st.start_timeout_min, tone: 'warning'};
+    case 'ACTIVE': {
+      if (!s.server_ok) return {text: 'A servir a partir do TNAS. Ainda não responde no servidor.'};
+      const e = s.ok_since ? minsSince(s.ok_since) : 0, left = s.stability_min - e;
+      if (left > 0) return {text: `Voltou a responder no servidor há ${dur(e)}. O regresso começa daqui a ${dur(left)}.`, pct: e / s.stability_min};
+      return {text: st.mode === 'auto' ? 'Estável no servidor. O regresso começa na próxima verificação.'
+        : 'Estável no servidor. Em modo automático o regresso já teria começado.', pct: 1};
+    }
+    case 'RETURNING':
+      return {text: sentence(s.msg) || 'A repor o DNS e a remover a cópia.', tone: 'warning'};
+    default:
+      return {text: `${sentence(s.msg) || 'O failover falhou.'} Volta ao normal quando o serviço responder no servidor.`, tone: 'error'};
+  }
+}
+
+function statusBlock(s) {
+  const d = describe(s);
+  const pct = d.pct == null ? null : Math.max(3, Math.min(100, d.pct * 100));
+  return `<div class="status tone-${d.tone || 'ok'}"><p>${esc(d.text)}</p>
+    ${pct == null ? '' : `<div class="bar" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>`}</div>`;
+}
+
+// Images: what a failover of each stack needs, and whether the TNAS has it (O4).
+function imgCount(names) {
+  const c = {known: !!st.images, unreadable: 0}, refs = new Map(); // stacks share images: count each once
+  for (const n of names) {
+    const stack = (st.images || {})[n];
+    if (!stack) continue;
+    if (stack.err) { c.unreadable++; continue; }
+    for (const i of stack.images || []) refs.set(i.ref, i);
+  }
+  const imgs = [...refs.values()];
+  c.total = imgs.length;
+  c.present = imgs.filter(i => i.present).length;
+  c.size = imgs.reduce((n, i) => n + (i.present ? i.size || 0 : 0), 0);
+  c.missing = c.total - c.present;
+  return c;
+}
+const allStacks = () => ['npm', ...st.services.map(s => s.name)];
+
+function imageList(name) {
+  const stack = (st.images || {})[name];
+  if (!stack) return `<p class="note-text">${st.images_scanning ? 'A verificar…' : 'Ainda não verificado.'}</p>`;
+  if (stack.err) return `<p class="bad-text">O compose não se deixou ler: ${esc(stack.err)}</p>`;
+  if (!stack.images?.length) return '<p class="note-text">Este compose não pede imagens.</p>';
+  return `<ul class="list">${stack.images.map(i => `<li>
+      <span class="${i.present ? 'ok-text' : 'bad-text'}">${icon(i.present ? 'check' : 'alert')}</span>
+      <span class="grow mono" title="${esc(i.ref)}">${esc(i.ref)}</span>
+      ${i.present ? `<span class="side">${bytes(i.size)}</span><span class="side" title="Data da imagem">${day(i.created)}</span>`
+        : '<span class="side bad-text">Em falta</span>'}</li>`).join('')}</ul>`;
+}
+
+function imagesMeta() {
+  const c = imgCount(allStacks());
+  if (!c.known) return {icon: 'docker', text: st.images_scanning ? 'A verificar as imagens…' : 'Imagens por verificar'};
+  const bad = c.missing + c.unreadable;
+  if (bad) return {icon: 'alert', warn: true, text: `${plural(bad, 'imagem em falta', 'imagens em falta')}: o failover precisaria da internet`};
+  return {icon: 'docker', text: `${plural(c.present, 'imagem pronta', 'imagens prontas')} para o failover, ${bytes(c.size)}`};
+}
+
+const pill = s => {
+  const S = look(s);
+  // failing on the server: a ring fills up until the failover starts
+  const ring = s.state === 'NORMAL' && s.fail_since && !s.server_ok
+    ? `<span class="ring" style="--p:${Math.min(100, Math.round(minsSince(s.fail_since) / s.wait_min * 100))}"></span>` : '';
+  return `<button class="pill ${S.busy ? 'busy' : ''} ${fine(s) ? 'quiet' : ''}" data-panel="svc" data-svc="${esc(s.name)}" data-flip="${esc(s.name)}"
+    style="--c:${S.c}" title="${esc(S.label)}. Ver detalhes">${icon(SVC_ICON[s.name])}${esc(s.name)}${S.busy ? '<span class="dot"></span>' : ring}</button>`;
+};
+
+// Heartbeat bars: the last checks of the server's NPM or of one service, newest on the right.
+const lastBeat = {};
+function beatsHtml(name) {
+  const b = (st.beats || {})[name] || [];
+  const isNew = b.length && lastBeat[name] !== b[b.length - 1].t;
+  const tip = x => `${new Date(x.t).toLocaleTimeString('pt-PT')}: ${x.s === 'up' ? `${x.ms} ms` : x.s === 'down' ? 'em falha' : 'não verificado'}`;
+  return '<i class="beat"></i>'.repeat(Math.max(0, 40 - b.length))
+    + b.map((x, i) => `<i class="beat ${x.s}${isNew && i === b.length - 1 ? ' new' : ''}" title="${esc(tip(x))}"></i>`).join('');
+}
+function beatsFoot(name) {
+  const b = (st.beats || {})[name] || [];
+  if (!b.length) return '<span>À espera da primeira verificação</span>';
+  const up = b.filter(x => x.s === 'up'), last = b[b.length - 1];
+  const avg = up.length ? Math.round(up.reduce((n, x) => n + x.ms, 0) / up.length) : 0;
+  return `<span>${esc(ago(b[0].t))}</span><span>${last.s === 'up' ? `${last.ms} ms, média ${avg} ms` : last.s === 'down' ? 'em falha' : 'não verificado'}</span>`;
+}
+// Bars live outside the painted markup so a new check does not redraw the whole card.
+function fillBeats() {
+  document.querySelectorAll('[data-beats]').forEach(el => {
+    const html = beatsHtml(el.dataset.beats);
+    if (el.__html !== html) { el.__html = html; el.innerHTML = html; }
+  });
+  document.querySelectorAll('[data-beats-foot]').forEach(el => {
+    const html = beatsFoot(el.dataset.beatsFoot);
+    if (el.__html !== html) { el.__html = html; el.innerHTML = html; }
+  });
+  for (const [name, b] of Object.entries(st.beats || {})) if (b.length) lastBeat[name] = b[b.length - 1].t;
+}
+const beatsBlock = name => `<div class="beats" data-beats="${esc(name)}" role="img" aria-label="Últimas verificações"></div>
+  <div class="beats-foot" data-beats-foot="${esc(name)}"></div>`;
+
+const serverChip = () => st.server_npm_ok ? chip('NPM a responder', 'var(--success)', 'quiet')
+  : chip(st.npm_alerted ? 'NPM em falha, servidor vivo' : `NPM sem resposta ${ago(st.npm_fail_since)}`, st.npm_alerted ? 'var(--warning)' : 'var(--error)');
+const tnasChip = () => {
+  const n = st.tnas_npm;
+  return !n.snapshot ? chip('NPM em espera', 'var(--neutral)') : n.ok ? chip('NPM a servir', 'var(--info)') : chip('NPM a arrancar', 'var(--warning)', 'busy');
+};
+
+// Machine state for the node icons. The agent runs on the TNAS, so the page
+// answering already says the TNAS is on; the pings say whether the LAN sees it.
+const serverHealth = () => !st.router_ok ? {s: 'unknown', why: 'Sem router, não dá para saber'}
+  : st.server_npm_ok ? {s: 'up', why: 'O servidor e o NPM respondem'}
+  : st.server_up ? {s: 'warn', why: 'O servidor responde a ping mas o NPM não'}
+  : {s: 'down', why: 'O servidor não responde'};
+const tnasHealth = () => !st.tnas_up ? {s: 'down', why: 'O TNAS não responde no próprio IP da LAN'}
+  : !st.router_ok ? {s: 'warn', why: 'O TNAS está ligado mas não chega ao router'}
+  : {s: 'up', why: 'O TNAS está ligado e na LAN'};
+
+let firstTopo = true;
+function renderTopology() {
+  const at = {server: [], moving: [], tnas: []};
+  for (const s of st.services) {
+    if (s.state === 'ACTIVE') at.tnas.push(s);
+    else if (s.state === 'FAILING_OVER' || s.state === 'RETURNING') at.moving.push(s);
+    else at.server.push(s);
+  }
+  const node = (kind, ic, title, ip, chipHtml, meta, list, empty, health) => `
+    <button class="node-head" data-panel="${kind}" aria-haspopup="dialog" title="Ver detalhes do ${title}">
+      <span class="node-icon st st-${health.s}" title="${esc(health.why)}">${icon(ic)}</span>
+      <span class="node-id"><span class="node-title">${title}</span><span class="mono muted">${esc(ip)}</span></span>
+      ${chipHtml}${icon('chevron', 'more')}</button>
+    <div class="node-meta ${meta.warn ? 'warn' : ''}">${icon(meta.icon)}<span>${esc(meta.text)}</span></div>
+    <div class="pills">${list.length ? list.map(pill).join('') : `<span class="empty">${empty}</span>`}</div>
+    ${kind === 'server' ? `<div class="node-beats">${beatsBlock('npm')}</div>` : ''}`;
+
+  // FLIP: remember where every pill was, redraw, then slide each moved pill from there.
+  const before = new Map([...document.querySelectorAll('.topo [data-flip]')].map(el => [el.dataset.flip, el.getBoundingClientRect()]));
+  paint('nodeServer', node('server', 'server', 'Servidor', st.server_ip, serverChip(),
+    {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`}, at.server, 'Nenhum serviço no servidor', serverHealth()));
+  paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), imagesMeta(), at.tnas, 'Nenhuma cópia a servir', tnasHealth()));
+  const lane = $('lane'), back = at.moving.length > 0 && at.moving.every(s => s.state === 'RETURNING') && !at.tnas.length;
+  // the link shows checks (probePulse) and services on their way; client traffic is on the wires
+  lane.classList.toggle('active', at.moving.length > 0);
+  lane.classList.toggle('moving', at.moving.length > 0);
+  lane.classList.toggle('back', back);
+  $('nodeTnas').classList.toggle('lit', at.tnas.length > 0);
+  paint('lane', `<span class="flow"></span><span class="lane-arrow">${icon(at.moving.length ? 'swap' : 'arrow')}</span>${at.moving.map(pill).join('')}
+    <span class="lane-label">verifica a cada ${st.check_interval_s} s</span>`);
+  paint('clients', `<span class="node-icon">${icon('devices')}</span><span><strong>Clientes</strong>
+    <small>LAN e WireGuard${st.dns_zone ? `, *.${esc(st.dns_zone)}` : ''}</small></span>`);
+  fillBeats();
+  renderWires();
+
+  if (!reduceMotion.matches) {
+    document.querySelectorAll('.topo [data-flip]').forEach((el, i) => {
+      if (firstTopo) {
+        el.animate([{opacity: 0, transform: 'translateY(6px) scale(.9)'}, {opacity: 1, transform: 'none'}],
+          {duration: 420, delay: 120 + i * 70, easing: EASE, fill: 'backwards'});
+        return;
+      }
+      const b = before.get(el.dataset.flip);
+      if (!b) return;
+      const a = el.getBoundingClientRect(), dx = b.left - a.left, dy = b.top - a.top;
+      if (Math.abs(dx) + Math.abs(dy) < 1) return;
+      el.animate([{transform: `translate(${dx}px, ${dy}px)`}, {transform: 'none'}], {duration: 800, easing: EASE});
+    });
+  }
+  firstTopo = false;
+
+  paint('router', `${chip(st.router_ok ? 'Router acessível' : 'Router inacessível', st.router_ok ? 'var(--success)' : 'var(--error)', st.router_ok ? 'xs quiet' : 'xs')}<span class="mono muted">${esc(st.router_ip)}</span>`);
+  probePulse();
+  const away = at.tnas.length + at.moving.length;
+  $('subtitle').textContent = away ? `${away} de ${st.services.length} serviços fora do servidor` : 'Todos os serviços no servidor';
+}
+
+// The wires from the clients: requests go wherever the DNS sends them, the
+// server unless a service's A record points at the TNAS. Packets travel along
+// the wires that carry traffic.
+function renderWires() {
+  const svg = $('wires'), topo = $('topo');
+  if (getComputedStyle(svg).display === 'none') return;
+  const box = topo.getBoundingClientRect();
+  const r = id => { const b = $(id).getBoundingClientRect(); return {x: b.left - box.left, y: b.top - box.top, w: b.width, h: b.height}; };
+  const c = r('clients'), s = r('nodeServer'), t = r('nodeTnas');
+  const from = {x: c.x + c.w / 2, y: c.y + c.h};
+  const d = to => { const k = (to.y - from.y) * .55; return `M ${from.x} ${from.y} C ${from.x} ${from.y + k}, ${to.x} ${to.y - k}, ${to.x} ${to.y}`; };
+  const viaTnas = st.services.filter(x => x.dns).length, viaServer = st.services.length - viaTnas;
+  const wire = (id, path, color, n) => {
+    const on = n > 0;
+    const pkts = on && !reduceMotion.matches ? Array.from({length: Math.min(3, n)}, (_, i) =>
+      `<circle r="3.5" class="pkt"><animateMotion dur="2.4s" begin="${(-i * 0.8).toFixed(1)}s" repeatCount="indefinite"><mpath href="#${id}"/></animateMotion></circle>`).join('') : '';
+    return `<g style="--wc:${color}"><path id="${id}" class="wire ${on ? 'on' : ''}" d="${path}"/>${pkts}</g>`;
+  };
+  const html = wire('wire-server', d({x: s.x + s.w * .62, y: s.y}), st.server_npm_ok ? 'var(--success)' : 'var(--error)', viaServer)
+    + wire('wire-tnas', d({x: t.x + t.w * .38, y: t.y}), 'var(--info)', viaTnas);
+  svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
+  if (svg.__html !== html) { svg.__html = html; svg.innerHTML = html; }
+}
+
+// Every check the agent makes (it runs on the TNAS) crosses the link to the
+// server once, green if the server's NPM answered, red if it did not.
+let lastTick = null;
+function probePulse() {
+  const tick = st.now;
+  if (tick === lastTick) return;
+  const first = lastTick === null;
+  lastTick = tick;
+  if (first || reduceMotion.matches || !st.router_ok) return;
+  const lane = $('lane'), vertical = matchMedia('(max-width: 860px)').matches;
+  const color = st.server_npm_ok ? 'var(--success)' : 'var(--error)';
+  const dot = document.createElement('span');
+  dot.className = 'probe';
+  dot.style.setProperty('--pc', color);
+  lane.append(dot);
+  const len = vertical ? lane.clientHeight : lane.clientWidth;
+  const at = p => vertical ? `translate(-50%, ${p}px)` : `translate(${p}px, -50%)`;
+  const ripple = el => el?.animate([{boxShadow: `0 0 0 0 color-mix(in srgb, ${color}, transparent 30%)`}, {boxShadow: '0 0 0 12px transparent'}],
+    {duration: 700, easing: 'ease-out'});
+  ripple(document.querySelector('#nodeTnas .node-icon'));
+  dot.animate([{transform: at(len), opacity: 0}, {opacity: 1, offset: .15}, {opacity: 1, offset: .85}, {transform: at(0), opacity: 0}],
+    {duration: 1100, easing: 'cubic-bezier(.45, 0, .55, 1)'}).onfinish = () => {
+      dot.remove();
+      ripple(document.querySelector('#nodeServer .node-icon'));
+    };
+}
+
+function renderGlobal() {
+  const auto = st.mode === 'auto';
+  $('modeChip').style.setProperty('--c', auto ? 'var(--success)' : 'var(--warning)');
+  $('modeChip').textContent = auto ? 'Automático' : 'Modo observação';
+  $('dnsChip').style.setProperty('--c', st.dns_enabled ? 'var(--info)' : 'var(--neutral)');
+  $('dnsChip').textContent = st.dns_enabled ? 'DNS ligado' : 'DNS desligado';
+  const g = $('maintGlobal'), busy = pending.has('maint:');
+  g.checked = busy ? pending.get('maint:') : !!st.maint_until;
+  g.disabled = busy;
+  $('maintGlobalText').textContent = busy ? 'A aplicar…' : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}` : 'Manutenção global';
+  const banner = !st.router_ok ? 'O router não responde. O agente não decide nada até ele voltar.'
+    : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}. Nenhum failover começa; os regressos continuam.` : '';
+  $('banner').hidden = !banner;
+  $('banner').style.setProperty('--c', st.router_ok ? 'var(--warning)' : 'var(--error)');
+  $('bannerText').textContent = banner;
+}
+
+function maintSwitch(s) {
+  const key = `maint:${s.name}`, busy = pending.has(key);
+  const on = busy ? pending.get(key) : !!s.maint_until;
+  const text = busy ? 'A aplicar…' : s.maint_until ? `Manutenção até ${clock(s.maint_until)}` : 'Manutenção';
+  return `<label class="toggle"><input type="checkbox" role="switch" class="switch" data-maint="${esc(s.name)}" ${on ? 'checked' : ''} ${busy ? 'disabled' : ''}>
+    <span>${text}</span></label>`;
+}
+
+function actionButton(s, act, allowed) {
+  const busy = pending.has(`${act}:${s.name}`);
+  if (!allowed && !busy) return '';
+  const cls = act === 'return' ? 'btn danger' : 'btn';
+  if (busy) return `<button class="${cls} busy" disabled><span class="dot"></span>${act === 'failover' ? 'A forçar failover…' : 'A forçar regresso…'}</button>`;
+  return `<button class="${cls}" data-act="${act}" data-svc="${esc(s.name)}">${icon(act === 'failover' ? 'swap' : 'restore')}${act === 'failover' ? 'Forçar failover' : 'Forçar regresso'}</button>`;
+}
+
+const actions = s => {
+  const canFail = s.state === 'NORMAL' || (s.state === 'ERROR' && !s.snapshot && !s.dns);
+  const canReturn = ['FAILING_OVER', 'ACTIVE', 'ERROR'].includes(s.state);
+  return `${maintSwitch(s)}<span>${actionButton(s, 'failover', canFail)} ${actionButton(s, 'return', canReturn)}</span>`;
+};
+
+function imagesDD(name) {
+  const c = imgCount([name]);
+  if (!c.known) return {v: '—'};
+  if (c.unreadable) return {v: 'compose ilegível', warn: true};
+  if (c.missing) return {v: `${c.missing} em falta`, warn: true};
+  return {v: c.total ? `${c.present} no TNAS` : 'nenhuma'};
+}
+
+function renderServices() {
+  const out = st.services.map(s => {
+    const S = look(s);
+    const img = imagesDD(s.name);
+    const meta = [{k: 'Espera', v: `${s.wait_min} min`}, {k: 'Estabilidade', v: `${s.stability_min} min`}, {k: 'Imagens', ...img}];
+    if (s.since) meta.push({k: 'Neste estado', v: dur(minsSince(s.since))});
+    return `<article class="card svc ${s.state !== 'NORMAL' || !s.server_ok ? 'alert' : ''}" id="svc-${esc(s.name)}" style="--accent:${S.c}">
+      <header class="svc-head">
+        <span class="svc-icon">${icon(SVC_ICON[s.name])}</span>
+        <div class="svc-id"><h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}${icon('chevron', 'more')}</button></h3>
+          <span class="mono" title="${esc(s.host)}">${esc(s.host)}</span></div>
+        ${chip(S.label, S.c, S.busy ? 'busy' : fine(s) ? 'quiet' : '')}
+      </header>
+      ${statusBlock(s)}
+      <div class="svc-beats">${beatsBlock(s.name)}</div>
+      <dl class="meta">${meta.map(m => `<div><dt>${m.k}</dt><dd class="${m.warn ? 'warn' : ''}">${esc(m.v)}</dd></div>`).join('')}</dl>
+      ${s.snapshot ? `<div class="snap" title="${esc(s.snapshot)}">${icon('layers')}<span class="mono">${esc(s.snapshot.split('/').pop())}</span>${s.dns ? chip('DNS → TNAS', 'var(--info)', 'xs') : ''}</div>` : ''}
+      <footer class="svc-foot">${actions(s)}</footer>
+    </article>`;
+  }).join('');
+  paint('svcs', out);
+  fillBeats();
+  const away = st.services.filter(s => s.state !== 'NORMAL').length;
+  $('svcCount').textContent = `${st.services.length} serviços${away ? `, ${away} fora do normal` : ''}`;
+}
+
+function evTone(m) {
+  if (/^ERRO/.test(m)) return 'var(--error)';
+  if (/^\[observação\]/.test(m)) return 'var(--neutral)';
+  if (/inacessível|falha|por concluir|por parar|manutenção/.test(m)) return 'var(--warning)';
+  if (/de volta|recuperou|voltou|acessível|descarregadas|todas as imagens/.test(m)) return 'var(--success)';
+  if (/failover|regresso|TNAS/.test(m)) return 'var(--info)';
+  return 'var(--neutral)';
+}
+const evItem = (e, fresh = false, withSvc = true) => `<li class="ev ${fresh ? 'fresh' : ''}" style="--c:${evTone(e.msg)}"><span class="ev-dot"></span><div>
+    <p>${esc(cap(e.msg))}</p>
+    <div class="ev-meta">${withSvc && e.svc ? chip(e.svc, 'var(--neutral)', 'xs') : ''}<time datetime="${esc(e.t)}" title="${esc(when(e.t))}">${esc(ago(e.t))}</time></div>
+  </div></li>`;
+
+let seen = null; // events already on screen; the ones that arrive later flash in
+function renderEvents() {
+  const all = st.events || [];
+  const key = e => e.t + e.msg;
+  const evs = all.slice(-80).reverse();
+  $('evCount').textContent = evs.length ? `últimos ${evs.length}` : '';
+  paint('events', evs.length ? evs.map(e => evItem(e, seen && !seen.has(key(e)) && !reduceMotion.matches)).join('')
+    : '<li class="empty">Ainda sem eventos. As falhas, os failovers e os regressos aparecem aqui.</li>');
+  seen = new Set(all.map(key));
+}
+
+// Details sheet: opened from a node, a pill or a card title; redrawn on every refresh while open.
+let panel = null;
+function openPanel(kind, name) {
+  panel = {kind, name};
+  painted.panelHead = painted.panelBody = painted.panelFoot = null;
+  renderPanel();
+  if (!$('panel').open) $('panel').showModal();
+}
+
+function serverPanel() {
+  const svcs = st.services.map(s => {
+    const S = look(s);
+    const onServer = !st.router_ok ? chip('Por verificar', 'var(--neutral)', 'xs')
+      : s.server_ok ? chip('A responder', 'var(--success)', 'xs') : chip(`Em falha${s.fail_since ? ' ' + ago(s.fail_since) : ''}`, 'var(--warning)', 'xs');
+    return `<li><span style="color:${S.c}">${icon(SVC_ICON[s.name])}</span>
+      <span class="grow"><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}">${esc(s.name)}</button> <span class="mono muted">${esc(s.host)}</span></span>
+      ${s.state !== 'NORMAL' ? chip(S.label, S.c, 'xs') : ''}${onServer}</li>`;
+  }).join('');
+  return {
+    head: `<span class="node-icon st st-${serverHealth().s}" title="${esc(serverHealth().why)}">${icon('server')}</span><div class="node-id"><h2 id="panelTitle">Servidor</h2>${mono(st.server_ip)}</div>${serverChip()}`,
+    body: sec('Como é verificado', `<p>A cada ${st.check_interval_s} s o agente pede ${mono('https://' + st.npm_check_host)} e o endereço de cada serviço, ligado diretamente a ${mono(st.server_ip)}. Se o NPM falhar e o servidor responder a ping, só avisa: não há failover.</p>`)
+      + sec('Estado', kv([
+        ['NPM do servidor', st.server_npm_ok ? '<span class="ok-text">A responder</span>'
+          : `<span class="${st.npm_alerted ? 'warn-text' : 'bad-text'}">Em falha ${esc(ago(st.npm_fail_since))}${st.npm_alerted ? ', com o servidor vivo: aviso enviado' : ''}</span>`],
+        ['Servidor', !st.router_ok ? 'Por verificar' : st.server_up ? '<span class="ok-text">Responde</span>' : '<span class="bad-text">Não responde ao NPM nem a ping</span>'],
+        ['Router', `${st.router_ok ? '<span class="ok-text">Acessível</span>' : '<span class="bad-text">Inacessível: o agente não decide nada</span>'} ${mono(st.router_ip)}`],
+        ['Última verificação', `às ${esc(new Date(st.now).toLocaleTimeString('pt-PT'))}`],
+      ]))
+      + sec('Últimas verificações do NPM', beatsBlock('npm'))
+      + sec('Serviços', `<ul class="list">${svcs}</ul>`),
+  };
+}
+
+function tnasPanel() {
+  const n = st.tnas_npm;
+  const copies = st.services.filter(s => s.snapshot || s.state === 'ACTIVE' || s.state === 'FAILING_OVER');
+  const c = imgCount(allStacks());
+  const scanning = st.images_scanning || pending.has('images');
+  const scanBtn = scanning ? '<button class="btn busy" disabled><span class="dot"></span>A verificar…</button>'
+    : `<button class="btn" data-scan>${icon('refresh')}Verificar agora</button>`;
+  const summary = !c.known ? '<p class="note-text">As imagens ainda não foram verificadas.</p>'
+    : `<p class="${c.missing + c.unreadable ? 'warn-text' : ''}">${c.missing + c.unreadable
+        ? `${plural(c.missing + c.unreadable, 'imagem em falta', 'imagens em falta')}. Sem elas, o failover desse serviço precisa da internet para arrancar.`
+        : c.present === 1 ? `A imagem de que os failovers precisam está no TNAS, ${bytes(c.size)}.`
+        : `As ${c.present} imagens de que os failovers precisam estão no TNAS, ${bytes(c.size)} no total.`}</p>
+      <p class="note-text">Verificado ${esc(ago(st.images_at))}, a partir dos composes do espelho, com os overrides aplicados.</p>`;
+  const stacks = allStacks().map(name => `<div class="stack"><div class="stack-name">${icon(SVC_ICON[name])}${name === 'npm' ? 'NPM do TNAS' : esc(name)}</div>${imageList(name)}</div>`).join('');
+  return {
+    head: `<span class="node-icon st st-${tnasHealth().s}" title="${esc(tnasHealth().why)}">${icon('nas')}</span><div class="node-id"><h2 id="panelTitle">TNAS</h2>${mono(st.tnas_ip)}</div>${tnasChip()}`,
+    body: sec('Estado', kv([
+        ['Agente', `<span class="ok-text">A correr</span>, versão ${mono(st.version)}. É ele que serve esta página`],
+        ['IP da LAN', st.tnas_up ? `<span class="ok-text">Responde</span> ${mono(st.tnas_ip)}` : `<span class="bad-text">Não responde</span> ${mono(st.tnas_ip)}`],
+        ['Router', st.router_ok ? `<span class="ok-text">Acessível</span> ${mono(st.router_ip)}` : `<span class="bad-text">Inacessível</span> ${mono(st.router_ip)}`],
+      ]) + '<p class="note-text">O TNAS está na LAN quando o próprio IP responde e chega ao router. Um ping ao próprio IP não sai da máquina: sozinho só confirma que o IP está ativo.</p>')
+      + sec('NPM do TNAS', kv([
+        ['Estado', !n.snapshot ? 'Parado, à espera do primeiro failover' : n.ok ? '<span class="ok-text">A servir</span>' : '<span class="warn-text">A arrancar</span>'],
+        n.snapshot && ['Snapshot', mono(n.snapshot)],
+        n.snapshot && ['Desde', esc(when(n.since))],
+      ]) + '<p class="note-text">Arranca com o primeiro failover, a partir de um snapshot do espelho, e para quando o último serviço regressa.</p>')
+      + sec('Cópias a correr', copies.length ? `<ul class="list">${copies.map(s => `<li><span style="color:${look(s).c}">${icon(SVC_ICON[s.name])}</span>
+          <span class="grow"><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}">${esc(s.name)}</button>
+          <span class="mono muted">${esc((s.snapshot || '').split('/').pop())}</span></span>
+          ${s.dns ? chip('DNS → TNAS', 'var(--info)', 'xs') : ''}${chip(look(s).label, look(s).c, 'xs')}</li>`).join('')}</ul>`
+        : '<p class="note-text">Nenhuma cópia a correr. Cada failover arranca de um snapshot Btrfs do espelho.</p>')
+      + sec('Imagens para o failover', summary + stacks, scanBtn)
+      + sec('Descarga noturna', `<p>${st.prepull_at ? `Todas as noites às ${esc(st.prepull_at)}, a partir dos composes do espelho.` : 'Desligada.'}
+          Última: ${esc(st.last_pull || 'ainda nenhuma')}.</p>`),
+  };
+}
+
+function svcPanel(s) {
+  if (!s) return {head: '', body: ''};
+  const S = look(s);
+  const events = (st.events || []).filter(e => e.svc === s.name).slice(-25).reverse();
+  return {
+    head: `<span class="svc-icon" style="--accent:${S.c}">${icon(SVC_ICON[s.name])}</span>
+      <div class="node-id"><h2 id="panelTitle">${esc(s.name)}</h2>${mono(s.host)}</div>${chip(S.label, S.c, S.busy ? 'busy' : '')}`,
+    body: `<div style="--accent:${S.c}">${sec('Agora', statusBlock(s))}</div>`
+      + sec('Configuração', kv([
+        ['Pasta no espelho', mono(s.dir)],
+        ['Override', s.override ? mono(s.override) : 'Nenhum, usa o compose tal como está'],
+        s.require_free_ip && ['IP que tem de estar livre', mono(s.require_free_ip)],
+        ['Espera antes do failover', `${s.wait_min} min`],
+        ['Estabilidade antes do regresso', `${s.stability_min} min`],
+        ['Manutenção', s.maint_until ? `Ligada até ${esc(clock(s.maint_until))}` : st.maint_until ? 'Global ligada' : 'Desligada'],
+      ]))
+      + (s.snapshot || s.dns ? sec('Cópia no TNAS', kv([
+        s.snapshot && ['Snapshot', mono(s.snapshot)],
+        ['DNS', s.dns ? `${mono(s.host)} aponta para o TNAS` : 'Sem mudança'],
+        s.since && ['Neste estado desde', esc(when(s.since))],
+      ])) : '')
+      + sec('Últimas verificações no servidor', beatsBlock(s.name))
+      + sec('Imagens', imageList(s.name))
+      + sec('Eventos', events.length ? `<ol class="timeline">${events.map(e => evItem(e, false, false)).join('')}</ol>` : '<p class="note-text">Ainda sem eventos deste serviço.</p>'),
+    foot: actions(s),
+  };
+}
+
+function renderPanel() {
+  if (!panel || !st) return;
+  const p = panel.kind === 'server' ? serverPanel() : panel.kind === 'tnas' ? tnasPanel()
+    : svcPanel(st.services.find(s => s.name === panel.name));
+  paint('panelHead', p.head);
+  paint('panelBody', p.body);
+  paint('panelFoot', p.foot || '');
+  $('panelFoot').hidden = !p.foot;
+  fillBeats();
+}
+
+// The rules form is filled only on demand, so the refresh never overwrites what is being typed.
+function fillForm() {
+  document.querySelector(`input[name=mode][value=${st.mode}]`).checked = true;
+  $('interval').value = st.check_interval_s;
+  $('cfgSvcs').innerHTML = st.services.map(s => `<tr data-name="${esc(s.name)}">
+    <td>${esc(s.name)}</td>
+    <td><input type="number" min="1" value="${s.wait_min}" aria-label="Espera de ${esc(s.name)} em minutos"><span class="unit">min</span></td>
+    <td><input type="number" min="0" value="${s.stability_min}" aria-label="Estabilidade de ${esc(s.name)} em minutos"><span class="unit">min</span></td></tr>`).join('');
+  markDirty();
+}
+function formValue() {
+  return {
+    mode: document.querySelector('input[name=mode]:checked')?.value,
+    check_interval_s: Number($('interval').value),
+    services: [...$('cfgSvcs').querySelectorAll('tr')].map(tr => {
+      const [w, s] = tr.querySelectorAll('input');
+      return {name: tr.dataset.name, wait_min: Number(w.value), stability_min: Number(s.value)};
+    }),
+  };
+}
+function markDirty() {
+  const saved = {mode: st.mode, check_interval_s: st.check_interval_s,
+    services: st.services.map(s => ({name: s.name, wait_min: s.wait_min, stability_min: s.stability_min}))};
+  const dirty = JSON.stringify(formValue()) !== JSON.stringify(saved);
+  $('dirty').hidden = !dirty;
+  $('save').disabled = !dirty;
+}
+
+function toast(msg, ok = true) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.style.setProperty('--c', ok ? 'var(--success)' : 'var(--error)');
+  el.innerHTML = `${icon(ok ? 'check' : 'alert')}<span>${esc(msg)}</span>`;
+  $('toasts').append(el);
+  setTimeout(() => el.remove(), ok ? 4000 : 9000);
+}
+
+function renderAll() { renderGlobal(); renderTopology(); renderServices(); renderEvents(); renderPanel(); }
+
+async function post(path, body, done, key, value = true) {
+  pending.set(key, value);
+  renderAll();
+  let ok = false;
+  try {
+    const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error((await r.text()).trim() || `HTTP ${r.status}`);
+    toast(done);
+    ok = true;
+  } catch (e) {
+    toast(`Não foi possível: ${e.message}`, false);
+  }
+  pending.delete(key);
+  await refresh();
+  return ok;
+}
+
+function confirmAction(title, body, ok) {
+  $('dlgTitle').textContent = title;
+  $('dlgBody').textContent = body;
+  $('dlgOk').textContent = ok;
+  const dlg = $('confirm');
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise(res => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok'), {once: true}));
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('api/status', {cache: 'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const first = !st;
+    st = await r.json();
+    lastOk = Date.now();
+    const live = $('live');
+    live.classList.remove('ping');
+    void live.offsetWidth; // restart the ripple
+    live.classList.add('ping');
+    renderAll();
+    if (first) { $('maintMin').value = st.default_expiry_min || 60; fillForm(); }
+  } catch (e) {
+    lastOk = lastOk || -1;
+  }
+  tickLive();
+}
+
+function tickLive() {
+  const live = $('live');
+  const s = Math.round((Date.now() - lastOk) / 1000);
+  const stale = lastOk <= 0 || s > 20;
+  live.classList.toggle('stale', stale);
+  $('liveText').textContent = lastOk <= 0 ? 'Sem ligação ao agente' : stale ? `Sem resposta há ${s} s` : `Atualizado há ${s} s`;
+}
+
+document.addEventListener('click', async e => {
+  const open = e.target.closest('[data-panel]');
+  if (open) { openPanel(open.dataset.panel, open.dataset.svc); return; }
+  if (e.target.closest('button[data-scan]')) { post('api/images', {}, 'A verificar as imagens no TNAS', 'images'); return; }
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const svc = b.dataset.svc;
+  const fail = b.dataset.act === 'failover';
+  const yes = await confirmAction(
+    fail ? `Forçar o failover de ${svc}?` : `Forçar o regresso de ${svc}?`,
+    fail ? 'Cria um snapshot do espelho, arranca a cópia no TNAS e, com o DNS ligado, aponta o nome para o TNAS. Acontece mesmo que o serviço responda no servidor.'
+      : 'Repõe o DNS, remove a cópia do TNAS e apaga o snapshot. O que foi escrito na cópia perde-se.',
+    fail ? 'Forçar failover' : 'Forçar regresso');
+  if (yes) post('api/action', {service: svc, action: b.dataset.act}, fail ? `Failover de ${svc} forçado` : `Regresso de ${svc} forçado`, `${b.dataset.act}:${svc}`);
+});
+
+document.addEventListener('change', e => {
+  const sw = e.target.closest('input.switch');
+  if (!sw) return;
+  const svc = sw.id === 'maintGlobal' ? '' : sw.dataset.maint;
+  const minutes = sw.checked ? Number($('maintMin').value) : 0;
+  const what = svc ? `Manutenção de ${svc}` : 'Manutenção global';
+  post('api/maintenance', {service: svc, minutes}, minutes ? `${what} ligada por ${dur(minutes)}` : `${what} desligada`, `maint:${svc}`, sw.checked);
+});
+
+$('panel').addEventListener('close', () => { panel = null; });
+$('panel').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // click on the backdrop
+$('panelClose').addEventListener('click', () => $('panel').close());
+$('cfg').addEventListener('input', markDirty);
+$('cfg').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('save').disabled = true;
+  $('save').textContent = 'A guardar…';
+  const ok = await post('api/config', formValue(), 'Alterações guardadas', 'config');
+  $('save').textContent = 'Guardar alterações';
+  if (ok) fillForm(); else markDirty();
+});
+$('reset').addEventListener('click', fillForm);
+
+new ResizeObserver(() => st && renderWires()).observe($('topo'));
+refresh();
+setInterval(refresh, 5000);
+setInterval(tickLive, 1000);
+</script>
+</body>
+</html>

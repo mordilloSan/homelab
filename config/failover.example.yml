@@ -1,0 +1,75 @@
+# Copiar para config/failover.yml. A interface reescreve este ficheiro ao guardar
+# (os comentários perdem-se); fica aqui a versão comentada.
+
+mode: observe                 # observe: só regista o que faria · auto: age
+server:
+  ip: 192.168.1.66
+  npm_check_host: nginx.engmariz.com   # R2: verificado primeiro, pelo .66
+tnas_ip: 192.168.1.249                 # cópias verificadas por aqui (R5) e destino do DNS
+router_ip: 192.168.1.1                 # R6
+lan_iface: ovs_eth0                    # interface do arping (R3)
+check_interval_s: 60
+start_timeout_min: 10                  # a cópia tem este tempo para ficar saudável, senão ERROR
+
+paths:
+  mirror_subvol: /Volume1/ServerBackup
+  mirror_root: homelab
+  snapshots_dir: /Volume1/Docker/failover-snapshots   # failover-<svc>-<timestamp>
+  overrides_dir: /Volume1/Docker/failover/overrides
+
+npm:
+  dir: npm
+  alert_after_min: 3                   # 2.3
+
+services:
+  - name: vaultwarden
+    dir: vaultwarden
+    host: bitwarden.engmariz.com
+    wait_min: 5
+    stability_min: 10
+  - name: homepage
+    dir: homepage
+    host: homepage.engmariz.com
+    wait_min: 10
+    stability_min: 10
+  - name: speedtest
+    dir: speedtest-tracker
+    host: speedtest.engmariz.com
+    wait_min: 30
+    stability_min: 10
+  - name: immich
+    dir: immich
+    host: immich.engmariz.com
+    wait_min: 15
+    stability_min: 10
+    override: immich.override.yml      # ML desligado
+  - name: unifi
+    dir: unifi
+    host: unifi.engmariz.com
+    wait_min: 15
+    stability_min: 0                   # minimiza o IP duplicado no regresso
+    override: unifi.override.yml       # parent ovs_eth0
+    require_free_ip: 192.168.1.92      # R3
+
+maintenance:
+  default_expiry_min: 60
+
+dns:
+  enabled: false                       # F3: sem DNS · F4: true
+  api_url: http://127.0.0.1:5380
+  token_file: /config/technitium.token
+  zone: engmariz.com
+  ttl: 60
+
+kuma:
+  base_url: http://192.168.1.249:3001
+  heartbeat_token: ""                  # monitor Push failover-agent
+  npm_token: ""                        # monitor Push failover-npm-servidor
+  service_tokens: {}                   # vaultwarden: <token>, ...  (monitores failover-<svc>)
+
+nightly:
+  prepull_at: "05:00"                  # depois do espelho das 04:30; "" desliga
+
+ui:
+  listen: 0.0.0.0:8099
+  password_hash: ""                    # echo 'password' | docker compose run --rm -T failover-agent hash
