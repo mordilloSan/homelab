@@ -98,7 +98,6 @@ main { max-width: 1680px; margin: 0 auto; padding: 20px 16px 48px; display: grid
   background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
 .switch:checked { background: var(--warning); }
 .switch:checked::before { transform: translateX(14px); }
-.switch.info:checked { background: var(--info); }
 .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 
 input[type=number] { width: 72px; padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--divider);
@@ -125,8 +124,9 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 
 /* the topology: where every service is running right now */
 .topo { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 180px) minmax(0, 1fr);
-  grid-template-areas: ". clients ." "server lane tnas"; row-gap: 48px; align-items: stretch; }
+  grid-template-areas: ". clients ." "server lane tnas" ". internet ."; row-gap: 48px; align-items: stretch; }
 #nodeServer { grid-area: server; } #nodeTnas { grid-area: tnas; } #lane { grid-area: lane; }
+#internet { grid-area: internet; }
 .clients { grid-area: clients; justify-self: center; position: relative; z-index: 1; display: flex; align-items: center; gap: 10px;
   padding: 7px 16px 7px 7px; border-radius: 999px; background: var(--paper); border: 1px solid var(--divider); box-shadow: var(--shadow); white-space: nowrap; }
 .clients .node-icon { width: 32px; height: 32px; border-radius: 50%; }
@@ -164,8 +164,6 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .node-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: 100%; padding: 0; border: 0; border-radius: 8px;
   background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .node-id { display: grid; min-width: 0; }
-.more { width: 18px; height: 18px; color: var(--muted); transition: transform .15s, color .15s; }
-.node-head:hover .more, .svc-open:hover .more { transform: translateX(2px); color: var(--text); }
 .node-meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .node-meta .icon { width: 15px; height: 15px; }
 .node-meta.warn { color: var(--warning); }
@@ -181,7 +179,7 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 @keyframes halo { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc), transparent 50%); } 70%, to { box-shadow: 0 0 0 8px transparent; } }
 @keyframes glow { 50% { background-color: color-mix(in srgb, var(--sc), transparent 68%); } }
 .node-title { font-size: 15px; font-weight: 600; }
-/* chip and chevron wrap together, to the right, when the head is narrow */
+/* the chip wraps to the right when the head is narrow */
 .node-end { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px; align-items: center; }
 .pill { --c: var(--success); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 9px; border-radius: 999px;
@@ -193,20 +191,22 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .pill .icon { width: 16px; height: 16px; color: var(--c); }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
 .empty { color: var(--muted); font-size: 12.5px; }
-/* the arrow sits on the link; the label above it, the services on their way below (beside it when vertical) */
-.lane { position: relative; display: grid; grid-template-rows: 1fr auto 1fr; grid-template-areas: "label" "arrow" "pills";
+/* the label above the link, the services on their way below (beside it when vertical) */
+.lane { position: relative; display: grid; grid-template-rows: 1fr 1fr; grid-template-areas: "label" "pills";
   justify-items: center; gap: 8px; padding: 12px 8px; }
 .lane-pills { grid-area: pills; align-self: start; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 /* opaque, so the link does not show through them when it runs vertically behind */
 .lane-pills .pill { background: var(--paper); }
 .lane-pills .pill:hover { background: color-mix(in srgb, var(--text) 8%, var(--paper)); }
-/* the link between the two: still while everything is on the server; while
-   traffic goes to the TNAS the dashes flow and a packet travels along them */
-.flow { --fc: var(--info); position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px;
+/* the link between the two: the agent's checks flow from the TNAS to the server,
+   green or red; while services are on their way it flows their way, in amber */
+.lane { --fc: var(--success); }
+.lane.down { --fc: var(--error); }
+.lane.moving { --fc: var(--warning); }
+.flow { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px;
   background: repeating-linear-gradient(90deg, var(--divider) 0 6px, transparent 6px 12px); }
 .lane.active .flow { background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
   animation: flow .8s linear infinite; }
-.lane.moving .flow { --fc: var(--warning); }
 .flow::after { content: ""; position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; opacity: 0;
   background: var(--fc); box-shadow: 0 0 10px 2px color-mix(in srgb, var(--fc), transparent 40%); }
 .lane.active .flow::after { opacity: 1; animation: packet 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
@@ -214,9 +214,6 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 @keyframes flow { to { background-position: 12px 0; } }
 @keyframes packet { from { left: 0; } to { left: calc(100% - 8px); } }
 .lane > :not(.flow, .probe) { position: relative; }
-.lane-arrow { grid-area: arrow; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--paper);
-  border: 1px solid var(--divider); color: var(--muted); }
-.lane.moving .lane-arrow { color: var(--warning); border-color: color-mix(in srgb, var(--warning), transparent 50%); }
 .hero-foot { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px;
   border-top: 1px solid var(--divider); }
 .hero-foot .router { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
@@ -350,11 +347,12 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
 @media (max-width: 860px) {
   .lower { grid-template-columns: minmax(0, 1fr); }
-  .topo { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clients" "server" "lane" "tnas"; row-gap: 0; }
+  .topo { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clients" "server" "lane" "tnas" "internet"; row-gap: 0; }
+  #internet { margin: 14px 0 0; }
   .wires { display: none; }
   .clients { margin-bottom: 14px; }
   .probe { left: 50%; top: 0; }
-  .lane { grid-template: auto auto / minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: ". arrow label" "pills pills pills";
+  .lane { grid-template: auto auto / minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: ". label" "pills pills";
     align-items: center; column-gap: 12px; padding: 14px 0; }
   .lane-label { justify-self: start; align-self: center; white-space: normal; }
   .lane-pills:empty { display: none; }
@@ -367,7 +365,6 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   @keyframes flow-v { to { background-position: 0 12px; } }
   @keyframes packet-v { from { top: 0; } to { top: calc(100% - 8px); } }
   dialog.sheet { border-radius: 0; }
-  .lane-arrow .icon { transform: rotate(90deg); }
 }
 @media (max-width: 420px) { .grid { grid-template-columns: minmax(0, 1fr); } .seg { grid-template-columns: 1fr; } .rules input[type=number] { width: 52px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
@@ -382,9 +379,9 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
     </div>
     <div class="top-meta">
       <span class="chip" id="modeChip"></span>
-      <span class="chip" id="dnsChip"></span>
       <span class="live" id="live"><span class="dot"></span><span id="liveText">A ligar ao agente…</span></span>
       <button class="icon-btn" id="settingsOpen" aria-label="Definições" title="Definições: conta e DNS" aria-haspopup="dialog" data-icon="cog"></button>
+      <button class="icon-btn" data-logout aria-label="Sair" title="Sair (sai sozinho após 30 min sem atividade)" data-icon="logout"></button>
     </div>
   </header>
 
@@ -396,6 +393,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
     <div class="topo" id="topo">
       <svg class="wires" id="wires" aria-hidden="true"></svg>
       <div class="clients" id="clients"></div>
+      <div class="clients" id="internet"></div>
       <div class="node" id="nodeServer"></div>
       <div class="lane" id="lane"></div>
       <div class="node" id="nodeTnas"></div>
@@ -476,7 +474,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
 <script>
 // mdi icons, the set LinuxIO uses (@iconify-json/mdi)
-const ICONS = {"server":"M4 1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1M9 5h1V3H9zm0 8h1v-2H9zm0 8h1v-2H9zM5 3v2h2V3zm0 8v2h2v-2zm0 8v2h2v-2z","nas":"M4 5c-1.11 0-2 .89-2 2v10c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V7c0-1.11-.89-2-2-2zm.5 2a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h13v10H7zm1 1v8h3V8zm4 0v8h3V8zm4 0v8h3V8zM9 9h1v1H9zm4 0h1v1h-1zm4 0h1v1h-1z","router":"M5 9c-1.1 0-2 .9-2 2v4a2 2 0 0 0 2 2h6v2h-1c-.55 0-1 .45-1 1H2v2h7c0 .55.45 1 1 1h4c.55 0 1-.45 1-1h7v-2h-7c0-.55-.45-1-1-1h-1v-2h6c1.11 0 2-.89 2-2v-4a2 2 0 0 0-2-2zm1 3h2v2H6zm3.5 0h2v2h-2zm3.5 0h2v2h-2z","shield":"M21 11c0 5.55-3.84 10.74-9 12c-5.16-1.26-9-6.45-9-12V5l9-4l9 4zm-9 10c3.75-1 7-5.46 7-9.78V6.3l-7-3.12L5 6.3v4.92C5 15.54 8.25 20 12 21m2.8-10V9.5C14.8 8.1 13.4 7 12 7S9.2 8.1 9.2 9.5V11c-.6 0-1.2.6-1.2 1.2v3.5c0 .7.6 1.3 1.2 1.3h5.5c.7 0 1.3-.6 1.3-1.2v-3.5c0-.7-.6-1.3-1.2-1.3m-1.3 0h-3V9.5c0-.8.7-1.3 1.5-1.3s1.5.5 1.5 1.3z","images":"M21 17H7V3h14m0-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2M3 5H1v16a2 2 0 0 0 2 2h16v-2H3m12.96-10.71l-2.75 3.54l-1.96-2.36L8.5 15h11z","speed":"M12 16a3 3 0 0 1-3-3c0-1.12.61-2.1 1.5-2.61l9.71-5.62l-5.53 9.58c-.5.98-1.51 1.65-2.68 1.65m0-13c1.81 0 3.5.5 4.97 1.32l-2.1 1.21C14 5.19 13 5 12 5a8 8 0 0 0-8 8c0 2.21.89 4.21 2.34 5.65h.01c.39.39.39 1.02 0 1.41s-1.03.39-1.42.01A9.97 9.97 0 0 1 2 13A10 10 0 0 1 12 3m10 10c0 2.76-1.12 5.26-2.93 7.07c-.39.38-1.02.38-1.41-.01a.996.996 0 0 1 0-1.41A7.95 7.95 0 0 0 20 13c0-1-.19-2-.54-2.9L20.67 8C21.5 9.5 22 11.18 22 13","dashboard":"M19 5v2h-4V5zM9 5v6H5V5zm10 8v6h-4v-6zM9 17v2H5v-2zM21 3h-8v6h8zM11 3H3v10h8zm10 8h-8v10h8zm-10 4H3v6h8z","ap":"M4.93 4.93A9.97 9.97 0 0 0 2 12c0 2.76 1.12 5.26 2.93 7.07l1.41-1.41A7.94 7.94 0 0 1 4 12c0-2.21.89-4.22 2.34-5.66zm14.14 0l-1.41 1.41A7.96 7.96 0 0 1 20 12c0 2.22-.89 4.22-2.34 5.66l1.41 1.41A9.97 9.97 0 0 0 22 12c0-2.76-1.12-5.26-2.93-7.07M7.76 7.76A5.98 5.98 0 0 0 6 12c0 1.65.67 3.15 1.76 4.24l1.41-1.41A4 4 0 0 1 8 12c0-1.11.45-2.11 1.17-2.83zm8.48 0l-1.41 1.41A4 4 0 0 1 16 12c0 1.11-.45 2.11-1.17 2.83l1.41 1.41A5.98 5.98 0 0 0 18 12c0-1.65-.67-3.15-1.76-4.24M12 10a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cube":"M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.99.99 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88zM12 4.15L6.04 7.5L12 10.85l5.96-3.35zM5 15.91l6 3.38v-6.71L5 9.21zm14 0v-6.7l-6 3.37v6.71z","swap":"m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z","wrench":"m22.61 19l-9.08-9.09c.93-2.34.47-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.5L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.39-.4.39-1.01 0-1.4m-3 1.59l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24L7.24 3c1.26-.05 2.49.39 3.44 1.33a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.46 9.45z","alert":"M11 15h2v2h-2zm0-8h2v6h-2zm1-5C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 18a8 8 0 0 1-8-8a8 8 0 0 1 8-8a8 8 0 0 1 8 8a8 8 0 0 1-8 8","check":"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z","restore":"M12 3a9 9 0 0 0-9 9H0l4 4l4-4H5a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7c-1.5 0-2.91-.5-4.06-1.3L6.5 19.14A9.1 9.1 0 0 0 12 21a9 9 0 0 0 9-9a9 9 0 0 0-9-9m2 9a2 2 0 0 0-2-2a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2","layers":"m12 18.54l7.37-5.74L21 14.07l-9 7l-9-7l1.62-1.26zM12 16L3 9l9-7l9 7zm0-11.47L6.26 9L12 13.47L17.74 9z","arrow":"M4 11v2h12l-5.5 5.5l1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5L16 11z","close":"M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z","docker":"M21.81 10.25c-.06-.04-.56-.43-1.64-.43c-.28 0-.56.03-.84.08c-.21-1.4-1.38-2.11-1.43-2.14l-.29-.17l-.18.27c-.24.36-.43.77-.51 1.19c-.2.8-.08 1.56.33 2.21c-.49.28-1.29.35-1.46.35H2.62c-.34 0-.62.28-.62.63c0 1.15.18 2.3.58 3.38c.45 1.19 1.13 2.07 2 2.61c.98.6 2.59.94 4.42.94c.79 0 1.61-.07 2.42-.22c1.12-.2 2.2-.59 3.19-1.16A8.3 8.3 0 0 0 16.78 16c1.05-1.17 1.67-2.5 2.12-3.65h.19c1.14 0 1.85-.46 2.24-.85c.26-.24.45-.53.59-.87l.08-.24zm-17.96.99h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H3.85c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.43 0h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H6.28c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.47 0h1.75c.1 0 .17-.07.17-.16V9.5c0-.08-.06-.16-.17-.16H8.75c-.08 0-.15.07-.15.16v1.58c0 .09.06.16.15.16m2.44 0h1.77c.08 0 .15-.07.15-.16V9.5c0-.08-.06-.16-.15-.16h-1.77c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16M6.28 9h1.76c.08 0 .16-.09.16-.18V7.25c0-.09-.07-.16-.16-.16H6.28c-.09 0-.16.06-.16.16v1.57c.01.09.07.18.16.18m2.47 0h1.75c.1 0 .17-.09.17-.18V7.25c0-.09-.06-.16-.17-.16H8.75c-.08 0-.15.06-.15.16v1.57c0 .09.06.18.15.18m2.44 0h1.77c.08 0 .15-.09.15-.18V7.25c0-.09-.07-.16-.15-.16h-1.77c-.08 0-.15.06-.15.16v1.57c0 .09.07.18.15.18m0-2.28h1.77c.08 0 .15-.07.15-.16V5c0-.1-.07-.17-.15-.17h-1.77c-.08 0-.15.06-.15.17v1.56c0 .08.07.16.15.16m2.46 4.52h1.76c.09 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16h-1.76c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16","chevron":"M8.59 16.58L13.17 12L8.59 7.41L10 6l6 6l-6 6z","clock":"M12 20a8 8 0 0 0 8-8a8 8 0 0 0-8-8a8 8 0 0 0-8 8a8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10a10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67l-.75 1.23L11 13V7z","refresh":"M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8a8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6a6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z","dns":"M7 9a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1M7 19a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1","devices":"M3 6h18V4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3zm10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.34 1-2.22s-.39-1.67-1-2.22zm-2 5.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5s1.5.67 1.5 1.5s-.67 1.5-1.5 1.5M22 8h-6c-.5 0-1 .5-1 1v10c0 .5.5 1 1 1h6c.5 0 1-.5 1-1V9c0-.5-.5-1-1-1m-1 10h-4v-8h4z","key":"M22 18v4h-4v-3h-3v-3h-3l-2.26-2.26c-.55.17-1.13.26-1.74.26a6 6 0 0 1-6-6a6 6 0 0 1 6-6a6 6 0 0 1 6 6c0 .61-.09 1.19-.26 1.74zM7 5a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cog":"M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64z","logout":"m17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5M4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4z"};
+const ICONS = {"server":"M4 1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1M9 5h1V3H9zm0 8h1v-2H9zm0 8h1v-2H9zM5 3v2h2V3zm0 8v2h2v-2zm0 8v2h2v-2z","nas":"M4 5c-1.11 0-2 .89-2 2v10c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V7c0-1.11-.89-2-2-2zm.5 2a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h13v10H7zm1 1v8h3V8zm4 0v8h3V8zm4 0v8h3V8zM9 9h1v1H9zm4 0h1v1h-1zm4 0h1v1h-1z","router":"M5 9c-1.1 0-2 .9-2 2v4a2 2 0 0 0 2 2h6v2h-1c-.55 0-1 .45-1 1H2v2h7c0 .55.45 1 1 1h4c.55 0 1-.45 1-1h7v-2h-7c0-.55-.45-1-1-1h-1v-2h6c1.11 0 2-.89 2-2v-4a2 2 0 0 0-2-2zm1 3h2v2H6zm3.5 0h2v2h-2zm3.5 0h2v2h-2z","shield":"M21 11c0 5.55-3.84 10.74-9 12c-5.16-1.26-9-6.45-9-12V5l9-4l9 4zm-9 10c3.75-1 7-5.46 7-9.78V6.3l-7-3.12L5 6.3v4.92C5 15.54 8.25 20 12 21m2.8-10V9.5C14.8 8.1 13.4 7 12 7S9.2 8.1 9.2 9.5V11c-.6 0-1.2.6-1.2 1.2v3.5c0 .7.6 1.3 1.2 1.3h5.5c.7 0 1.3-.6 1.3-1.2v-3.5c0-.7-.6-1.3-1.2-1.3m-1.3 0h-3V9.5c0-.8.7-1.3 1.5-1.3s1.5.5 1.5 1.3z","images":"M21 17H7V3h14m0-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2M3 5H1v16a2 2 0 0 0 2 2h16v-2H3m12.96-10.71l-2.75 3.54l-1.96-2.36L8.5 15h11z","speed":"M12 16a3 3 0 0 1-3-3c0-1.12.61-2.1 1.5-2.61l9.71-5.62l-5.53 9.58c-.5.98-1.51 1.65-2.68 1.65m0-13c1.81 0 3.5.5 4.97 1.32l-2.1 1.21C14 5.19 13 5 12 5a8 8 0 0 0-8 8c0 2.21.89 4.21 2.34 5.65h.01c.39.39.39 1.02 0 1.41s-1.03.39-1.42.01A9.97 9.97 0 0 1 2 13A10 10 0 0 1 12 3m10 10c0 2.76-1.12 5.26-2.93 7.07c-.39.38-1.02.38-1.41-.01a.996.996 0 0 1 0-1.41A7.95 7.95 0 0 0 20 13c0-1-.19-2-.54-2.9L20.67 8C21.5 9.5 22 11.18 22 13","dashboard":"M19 5v2h-4V5zM9 5v6H5V5zm10 8v6h-4v-6zM9 17v2H5v-2zM21 3h-8v6h8zM11 3H3v10h8zm10 8h-8v10h8zm-10 4H3v6h8z","ap":"M4.93 4.93A9.97 9.97 0 0 0 2 12c0 2.76 1.12 5.26 2.93 7.07l1.41-1.41A7.94 7.94 0 0 1 4 12c0-2.21.89-4.22 2.34-5.66zm14.14 0l-1.41 1.41A7.96 7.96 0 0 1 20 12c0 2.22-.89 4.22-2.34 5.66l1.41 1.41A9.97 9.97 0 0 0 22 12c0-2.76-1.12-5.26-2.93-7.07M7.76 7.76A5.98 5.98 0 0 0 6 12c0 1.65.67 3.15 1.76 4.24l1.41-1.41A4 4 0 0 1 8 12c0-1.11.45-2.11 1.17-2.83zm8.48 0l-1.41 1.41A4 4 0 0 1 16 12c0 1.11-.45 2.11-1.17 2.83l1.41 1.41A5.98 5.98 0 0 0 18 12c0-1.65-.67-3.15-1.76-4.24M12 10a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cube":"M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.99.99 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88zM12 4.15L6.04 7.5L12 10.85l5.96-3.35zM5 15.91l6 3.38v-6.71L5 9.21zm14 0v-6.7l-6 3.37v6.71z","swap":"m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z","wrench":"m22.61 19l-9.08-9.09c.93-2.34.47-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.5L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.39-.4.39-1.01 0-1.4m-3 1.59l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24L7.24 3c1.26-.05 2.49.39 3.44 1.33a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.46 9.45z","alert":"M11 15h2v2h-2zm0-8h2v6h-2zm1-5C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 18a8 8 0 0 1-8-8a8 8 0 0 1 8-8a8 8 0 0 1 8 8a8 8 0 0 1-8 8","check":"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z","restore":"M12 3a9 9 0 0 0-9 9H0l4 4l4-4H5a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7c-1.5 0-2.91-.5-4.06-1.3L6.5 19.14A9.1 9.1 0 0 0 12 21a9 9 0 0 0 9-9a9 9 0 0 0-9-9m2 9a2 2 0 0 0-2-2a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2","layers":"m12 18.54l7.37-5.74L21 14.07l-9 7l-9-7l1.62-1.26zM12 16L3 9l9-7l9 7zm0-11.47L6.26 9L12 13.47L17.74 9z","close":"M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z","docker":"M21.81 10.25c-.06-.04-.56-.43-1.64-.43c-.28 0-.56.03-.84.08c-.21-1.4-1.38-2.11-1.43-2.14l-.29-.17l-.18.27c-.24.36-.43.77-.51 1.19c-.2.8-.08 1.56.33 2.21c-.49.28-1.29.35-1.46.35H2.62c-.34 0-.62.28-.62.63c0 1.15.18 2.3.58 3.38c.45 1.19 1.13 2.07 2 2.61c.98.6 2.59.94 4.42.94c.79 0 1.61-.07 2.42-.22c1.12-.2 2.2-.59 3.19-1.16A8.3 8.3 0 0 0 16.78 16c1.05-1.17 1.67-2.5 2.12-3.65h.19c1.14 0 1.85-.46 2.24-.85c.26-.24.45-.53.59-.87l.08-.24zm-17.96.99h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H3.85c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.43 0h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H6.28c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.47 0h1.75c.1 0 .17-.07.17-.16V9.5c0-.08-.06-.16-.17-.16H8.75c-.08 0-.15.07-.15.16v1.58c0 .09.06.16.15.16m2.44 0h1.77c.08 0 .15-.07.15-.16V9.5c0-.08-.06-.16-.15-.16h-1.77c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16M6.28 9h1.76c.08 0 .16-.09.16-.18V7.25c0-.09-.07-.16-.16-.16H6.28c-.09 0-.16.06-.16.16v1.57c.01.09.07.18.16.18m2.47 0h1.75c.1 0 .17-.09.17-.18V7.25c0-.09-.06-.16-.17-.16H8.75c-.08 0-.15.06-.15.16v1.57c0 .09.06.18.15.18m2.44 0h1.77c.08 0 .15-.09.15-.18V7.25c0-.09-.07-.16-.15-.16h-1.77c-.08 0-.15.06-.15.16v1.57c0 .09.07.18.15.18m0-2.28h1.77c.08 0 .15-.07.15-.16V5c0-.1-.07-.17-.15-.17h-1.77c-.08 0-.15.06-.15.17v1.56c0 .08.07.16.15.16m2.46 4.52h1.76c.09 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16h-1.76c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16","clock":"M12 20a8 8 0 0 0 8-8a8 8 0 0 0-8-8a8 8 0 0 0-8 8a8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10a10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67l-.75 1.23L11 13V7z","refresh":"M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8a8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6a6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z","dns":"M7 9a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1M7 19a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1","devices":"M3 6h18V4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3zm10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.34 1-2.22s-.39-1.67-1-2.22zm-2 5.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5s1.5.67 1.5 1.5s-.67 1.5-1.5 1.5M22 8h-6c-.5 0-1 .5-1 1v10c0 .5.5 1 1 1h6c.5 0 1-.5 1-1V9c0-.5-.5-1-1-1m-1 10h-4v-8h4z","key":"M22 18v4h-4v-3h-3v-3h-3l-2.26-2.26c-.55.17-1.13.26-1.74.26a6 6 0 0 1-6-6a6 6 0 0 1 6-6a6 6 0 0 1 6 6c0 .61-.09 1.19-.26 1.74zM7 5a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cog":"M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64z","web":"M16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2m-5.15 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56M14.34 14H9.66c-.1-.66-.16-1.32-.16-2s.06-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2M12 19.96c-.83-1.2-1.5-2.53-1.91-3.96h3.82c-.41 1.43-1.08 2.76-1.91 3.96M8 8H5.08A7.92 7.92 0 0 1 9.4 4.44C8.8 5.55 8.35 6.75 8 8m-2.92 8H8c.35 1.25.8 2.45 1.4 3.56A8 8 0 0 1 5.08 16m-.82-2C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2M12 4.03c.83 1.2 1.5 2.54 1.91 3.97h-3.82c.41-1.43 1.08-2.77 1.91-3.97M18.92 8h-2.95a15.7 15.7 0 0 0-1.38-3.56c1.84.63 3.37 1.9 4.33 3.56M12 2C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2","logout":"m17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5M4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4z"};
 const SVC_ICON = {vaultwarden: 'shield', homepage: 'dashboard', speedtest: 'speed', immich: 'images', unifi: 'ap', npm: 'dns'};
 const STATES = {
   NORMAL: {label: 'No servidor', c: 'var(--success)'},
@@ -672,7 +670,7 @@ function renderTopology() {
     <button class="node-head" data-panel="${kind}" aria-haspopup="dialog" title="Ver detalhes do ${title}">
       <span class="node-icon st st-${health.s}" title="${esc(health.why)}">${icon(ic)}</span>
       <span class="node-id"><span class="node-title">${title}</span><span class="mono muted">${esc(ip)}</span></span>
-      <span class="node-end">${chipHtml}${icon('chevron', 'more')}</span></button>
+      <span class="node-end">${chipHtml}</span></button>
     <div class="node-meta ${meta.warn ? 'warn' : ''}">${icon(meta.icon)}<span>${esc(meta.text)}</span></div>
     <div class="pills">${list.length ? list.map(pill).join('') : `<span class="empty">${empty}</span>`}</div>
     ${kind === 'server' ? `<div class="node-beats">${beatsBlock('npm')}</div>` : ''}`;
@@ -683,15 +681,22 @@ function renderTopology() {
     {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`}, at.server, 'Nenhum serviço no servidor', serverHealth()));
   paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), imagesMeta(), at.tnas, 'Nenhuma cópia a servir', tnasHealth()));
   const lane = $('lane'), back = at.moving.length > 0 && at.moving.every(s => s.state === 'RETURNING') && !at.tnas.length;
-  // the link shows checks (probePulse) and services on their way; client traffic is on the wires
-  lane.classList.toggle('active', at.moving.length > 0);
+  // the link shows the checks (probePulse marks each one) and services on their way; client traffic is on the wires
+  lane.classList.toggle('active', at.moving.length > 0 || st.router_ok);
   lane.classList.toggle('moving', at.moving.length > 0);
-  lane.classList.toggle('back', back);
+  lane.classList.toggle('down', !st.server_npm_ok);
+  lane.classList.toggle('back', at.moving.length ? back : true);
   $('nodeTnas').classList.toggle('lit', at.tnas.length > 0);
-  paint('lane', `<span class="flow"></span><span class="lane-arrow">${icon(at.moving.length ? 'swap' : 'arrow')}</span><div class="lane-pills">${at.moving.map(pill).join('')}</div>
-    <span class="lane-label">verifica a cada ${st.check_interval_s} s</span>`);
+  paint('lane', `<span class="flow"></span><div class="lane-pills">${at.moving.map(pill).join('')}</div>
+    <span class="lane-label">verifica o servidor a cada ${st.check_interval_s} s</span>`);
   paint('clients', `<span class="node-icon">${icon('devices')}</span><span><strong>Clientes</strong>
     <small>LAN e WireGuard${st.dns_zone ? `, *.${esc(st.dns_zone)}` : ''}</small></span>`);
+  const nets = netState(), off = [nets.server === 'down' && 'servidor', nets.tnas === 'down' && 'TNAS'].filter(Boolean);
+  const all = Object.values(nets);
+  const ns = all.every(x => x === 'up') ? 'up' : all.includes('up') ? 'warn' : all.includes('down') ? 'down' : 'unknown';
+  const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : all.includes('unknown') ? 'por verificar' : 'servidor e TNAS com acesso';
+  paint('internet', `<span class="node-icon st st-${ns}">${icon('web')}</span><span><strong>Internet</strong><small>${ntext}</small></span>`);
+  $('internet').title = `A cada ${st.check_interval_s} s, cada caixa pede ao seu Technitium um nome que nenhuma cache tem: a resposta tem de vir da internet`;
   fillBeats();
   renderWires();
 
@@ -717,6 +722,13 @@ function renderTopology() {
   $('subtitle').textContent = away ? `${away} de ${st.services.length} serviços fora do servidor` : 'Todos os serviços no servidor';
 }
 
+// Each box's internet, as its Technitium last answered; unknown while the box
+// cannot be checked.
+const netState = () => ({
+  server: !st.router_ok || !st.server_up ? 'unknown' : st.server_net_ok ? 'up' : 'down',
+  tnas: !st.router_ok ? 'unknown' : st.tnas_net_ok ? 'up' : 'down',
+});
+
 // The wires from the clients: requests go wherever the DNS sends them, the
 // server unless a service's A record points at the TNAS. Packets travel along
 // the wires that carry traffic.
@@ -726,8 +738,9 @@ function renderWires() {
   const box = topo.getBoundingClientRect();
   const r = id => { const b = $(id).getBoundingClientRect(); return {x: b.left - box.left, y: b.top - box.top, w: b.width, h: b.height}; };
   const c = r('clients'), s = r('nodeServer'), t = r('nodeTnas');
+  const n = r('internet');
   const from = {x: c.x + c.w / 2, y: c.y + c.h};
-  const d = to => { const k = (to.y - from.y) * .55; return `M ${from.x} ${from.y} C ${from.x} ${from.y + k}, ${to.x} ${to.y - k}, ${to.x} ${to.y}`; };
+  const d = (to, f = from) => { const k = (to.y - f.y) * .55; return `M ${f.x} ${f.y} C ${f.x} ${f.y + k}, ${to.x} ${to.y - k}, ${to.x} ${to.y}`; };
   const viaTnas = st.services.filter(x => x.dns).length, viaServer = st.services.length - viaTnas;
   const wire = (id, path, color, n) => {
     const on = n > 0;
@@ -735,8 +748,13 @@ function renderWires() {
       `<circle r="3.5" class="pkt"><animateMotion dur="2.4s" begin="${(-i * 0.8).toFixed(1)}s" repeatCount="indefinite"><mpath href="#${id}"/></animateMotion></circle>`).join('') : '';
     return `<g style="--wc:${color}"><path id="${id}" class="wire ${on ? 'on' : ''}" d="${path}"/>${pkts}</g>`;
   };
+  const nets = netState();
+  const netWire = (id, f, to, s) => wire(id, d(to, f), s === 'up' ? 'var(--success)' : 'var(--error)', s === 'unknown' ? 0 : 1);
   const html = wire('wire-server', d({x: s.x + s.w * .62, y: s.y}), st.server_npm_ok ? 'var(--success)' : 'var(--error)', viaServer)
-    + wire('wire-tnas', d({x: t.x + t.w * .38, y: t.y}), 'var(--info)', viaTnas);
+    + wire('wire-tnas', d({x: t.x + t.w * .38, y: t.y}), 'var(--info)', viaTnas)
+    // and from each box down to the internet, through its own Technitium
+    + netWire('wire-net-server', {x: s.x + s.w * .62, y: s.y + s.h}, {x: n.x + n.w * .3, y: n.y}, nets.server)
+    + netWire('wire-net-tnas', {x: t.x + t.w * .38, y: t.y + t.h}, {x: n.x + n.w * .7, y: n.y}, nets.tnas);
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
   if (svg.__html !== html) { svg.__html = html; svg.innerHTML = html; }
 }
@@ -772,13 +790,12 @@ function renderGlobal() {
   const auto = st.mode === 'auto';
   $('modeChip').style.setProperty('--c', auto ? 'var(--success)' : 'var(--warning)');
   $('modeChip').textContent = auto ? 'Automático' : 'Modo observação';
-  $('dnsChip').style.setProperty('--c', st.dns_enabled ? 'var(--info)' : 'var(--neutral)');
-  $('dnsChip').textContent = st.dns_enabled ? 'DNS ligado' : 'DNS desligado';
   const g = $('maintGlobal'), busy = pending.has('maint:');
   g.checked = busy ? pending.get('maint:') : !!st.maint_until;
   g.disabled = busy;
   $('maintGlobalText').textContent = busy ? 'A aplicar…' : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}` : 'Manutenção global';
   const banner = !st.router_ok ? 'O router não responde. O agente não decide nada até ele voltar.'
+    : !st.dns_token ? 'Falta o token do Technitium: sem ele um failover dá erro logo no início. Põe-no em Definições.'
     : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}. Nenhum failover começa; os regressos continuam.` : '';
   $('banner').hidden = !banner;
   $('banner').style.setProperty('--c', st.router_ok ? 'var(--warning)' : 'var(--error)');
@@ -825,7 +842,7 @@ function renderServices() {
     return `<article class="card svc ${s.state !== 'NORMAL' || !s.server_ok ? 'alert' : ''}" id="svc-${esc(s.name)}" style="--accent:${S.c}">
       <header class="svc-head">
         <span class="svc-icon">${icon(SVC_ICON[s.name])}</span>
-        <div class="svc-id"><div class="svc-title"><h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}${icon('chevron', 'more')}</button></h3>
+        <div class="svc-id"><div class="svc-title"><h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}</button></h3>
           ${chip(S.label, S.c, S.busy ? 'busy' : fine(s) ? 'quiet' : '')}</div>
           <span class="mono" title="${esc(s.host)}">${esc(s.host)}</span></div>
       </header>
@@ -967,15 +984,11 @@ function svcPanel(s) {
 // Settings: the account and DNS. Only fields that rarely change go in the HTML,
 // so the refresh does not repaint it while a token is being typed.
 function settingsPanel() {
-  const onTnas = st.services.filter(s => s.dns).map(s => s.name);
   return {
     head: `<span class="node-icon">${icon('cog')}</span><div class="node-id"><h2 id="panelTitle">Definições</h2><span class="muted">Conta e DNS</span></div>`,
     body: sec('Conta', kv([['Utilizador', mono(st.user)]])
-        + `<div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button><button class="btn" data-logout>${icon('logout')}Sair</button></div>`)
-      + sec('DNS (Technitium)', `<label class="toggle"><input type="checkbox" role="switch" class="switch info" id="dnsSwitch" ${st.dns_enabled ? 'checked' : ''}>
-          <span>${st.dns_enabled ? 'Ligado' : 'Desligado'}</span></label>
-        <p class="note-text">Ligado, o agente aponta o nome de um serviço para o TNAS quando a cópia fica pronta, e repõe-no no regresso.${
-          onTnas.length ? ` Só se desliga depois do regresso de ${esc(onTnas.join(', '))}.` : ''}</p>`
+        + `<div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>`)
+      + sec('DNS (Technitium)', `<p class="note-text">O agente aponta o nome de um serviço para o TNAS quando a cópia fica pronta, e repõe-no no regresso.</p>`
         + kv([['Zona', mono(st.dns_zone)], ['API', mono(st.dns_api_url)],
           ['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])
         + `<form id="tokenForm"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
@@ -1104,7 +1117,7 @@ document.addEventListener('click', async e => {
   const fail = b.dataset.act === 'failover';
   const yes = await confirmAction(
     fail ? `Forçar o failover de ${svc}?` : `Forçar o regresso de ${svc}?`,
-    fail ? 'Cria um snapshot do espelho, arranca a cópia no TNAS e, com o DNS ligado, aponta o nome para o TNAS. Acontece mesmo que o serviço responda no servidor.'
+    fail ? 'Cria um snapshot do espelho, arranca a cópia no TNAS e aponta o nome para o TNAS. Acontece mesmo que o serviço responda no servidor.'
       : 'Repõe o DNS, remove a cópia do TNAS e apaga o snapshot. O que foi escrito na cópia perde-se.',
     fail ? 'Forçar failover' : 'Forçar regresso');
   if (yes) post('api/action', {service: svc, action: b.dataset.act}, fail ? `Failover de ${svc} forçado` : `Regresso de ${svc} forçado`, `${b.dataset.act}:${svc}`);
@@ -1113,11 +1126,6 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const sw = e.target.closest('input.switch');
   if (!sw) return;
-  if (sw.id === 'dnsSwitch') {
-    await post('api/dns', {enabled: sw.checked}, sw.checked ? 'DNS ligado' : 'DNS desligado', 'dns', sw.checked);
-    sw.checked = st.dns_enabled; // a refused change goes back
-    return;
-  }
   const svc = sw.id === 'maintGlobal' ? '' : sw.dataset.maint;
   const minutes = sw.checked ? Number($('maintMin').value) : 0;
   const what = svc ? `Manutenção de ${svc}` : 'Manutenção global';
@@ -1130,6 +1138,18 @@ function openPw() {
   $('pwErr').textContent = '';
   $('pwDlg').showModal();
 }
+// Out after 30 min without input. The page's polling keeps the session alive on
+// the agent, so idleness is counted here, across tabs through localStorage.
+const IDLE_MS = 30 * 60e3;
+let lastInput = Date.now();
+const touch = () => { lastInput = Date.now(); try { localStorage.failoverInput = lastInput; } catch {} };
+touch();
+['pointerdown', 'keydown', 'wheel'].forEach(t => addEventListener(t, touch, {passive: true}));
+setInterval(() => {
+  let t = lastInput;
+  try { t = Math.max(t, Number(localStorage.failoverInput) || 0); } catch {}
+  if (Date.now() - t > IDLE_MS) logout();
+}, 10e3);
 async function logout() {
   await fetch('api/logout', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
   location.href = 'login';
@@ -1143,7 +1163,7 @@ document.addEventListener('submit', async e => {
   $('tokenErr').textContent = '';
   try {
     const r = toLogin(await fetch('api/dns', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({enabled: st.dns_enabled, token: $('dnsToken').value})}));
+      body: JSON.stringify({token: $('dnsToken').value})}));
     if (!r.ok) throw new Error((await r.text()).trim() || `HTTP ${r.status}`);
     $('dnsToken').value = '';
     toast('Token testado e gravado');

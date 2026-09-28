@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -92,7 +93,7 @@ func healthcheck(cfgPath string) error {
 	if err != nil {
 		return err
 	}
-	return agent.Healthcheck(cfg.UI.Listen)
+	return agent.Healthcheck(cfg.UI.Listen, cfg.UI.TLSCert != "")
 }
 
 // serve runs the agent until ctx ends. A signal stops it between ticks, never
@@ -119,7 +120,15 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	if err != nil {
 		return fmt.Errorf("interface: %w", err)
 	}
+	https := cfg.UI.TLSCert != ""
 	srv := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	if https {
+		if srv.TLSConfig, err = agent.UITLS(cfg.UI.TLSCert, cfg.UI.TLSKey); err != nil {
+			_ = ln.Close()
+			return err
+		}
+		ln = tls.NewListener(ln, srv.TLSConfig)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	serveErr := make(chan error, 1)
@@ -130,7 +139,7 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 		}
 	}()
 
-	ui, err := agent.UIURL(cfg.UI.Listen, cfg.TNASIP)
+	ui, err := agent.UIURL(cfg.UI.Listen, cfg.TNASIP, https)
 	if err != nil {
 		ui = cfg.UI.Listen
 	}

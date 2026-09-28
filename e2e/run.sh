@@ -165,7 +165,7 @@ paths: {mirror_subvol: $W/ServerBackup, mirror_root: homelab, snapshots_dir: $W/
 npm: {dir: npm, alert_after_min: 1}
 services:
 $svc_config
-dns: {enabled: true, api_url: "http://10.123.2.53:5380", token_file: $W/config/technitium.token, zone: e2e.test, ttl: 60}
+dns: {api_url: "http://10.123.2.53:5380", token_file: $W/config/technitium.token, zone: e2e.test, ttl: 60}
 ui: {listen: "127.0.0.1:18099"}
 EOF
 

@@ -17,7 +17,7 @@ var loginHTML []byte
 
 const (
 	sessionCookie = "failover_session"
-	sessionTTL    = 7 * 24 * time.Hour // renewed on every request, so it only runs out when idle
+	sessionTTL    = 30 * time.Minute // renewed on every request; the page logs out by itself after 30 min without input
 )
 
 var loginDelay = time.Second // after a wrong login, to slow down guessing; tests set it to 0
@@ -136,7 +136,8 @@ func (a *Agent) postLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?erro=1", http.StatusSeeOther)
 		return
 	}
-	setSession(w, r, a.sessions.create(), int(sessionTTL.Seconds()))
+	// a browser-session cookie: the agent renews the session, a Max-Age would not be
+	setSession(w, r, a.sessions.create(), 0)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

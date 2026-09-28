@@ -29,6 +29,16 @@ type fake struct {
 	badToken string            // the Technitium refuses this bearer token
 	getErr   map[string]error  // URL prefix → Get fails with this
 	left     map[string]string // compose project → ids docker ps / volume ls still list
+	noNet    map[string]bool   // ip → its DNS resolver does not reach the internet
+}
+
+func (f *fake) Resolve(ip string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.noNet[ip] {
+		return errors.New("server misbehaving")
+	}
+	return nil
 }
 
 func (f *fake) Run(name string, args ...string) error {
@@ -134,7 +144,6 @@ func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	cfg.Mode = "auto"
 	cfg.Paths.SnapshotsDir = filepath.Join(dir, "snaps")
 	cfg.Nightly.PrepullAt = ""
-	cfg.DNS.Enabled = true
 	cfg.DNS.TokenFile = filepath.Join(dir, "token")
 	cfg.Kuma.HeartbeatToken, cfg.Kuma.NPMToken = "hb", "npmtok"
 	cfg.Kuma.ServiceTokens = map[string]string{"vaultwarden": "vwtok"}
@@ -257,20 +266,18 @@ func TestReturnLeftovers(t *testing.T) {
 	}
 }
 
-// DNS turned on in the UI during a failover: the record is added on the next tick.
-func TestDNSOnWhileActive(t *testing.T) {
+// Without the Technitium token a failover goes to ERROR before the snapshot:
+// the copy could not be reached by name.
+func TestFailoverWithoutToken(t *testing.T) {
 	a, f := setup(t)
-	a.cfg.DNS.Enabled = false
+	if err := os.Remove(a.cfg.DNS.TokenFile); err != nil {
+		t.Fatal(err)
+	}
 	f.down["bitwarden.engmariz.com@"+srv] = true
 	at := t0
 	tickTo(a, &at, 5)
-	if state(a, "vaultwarden") != Active || hasGet(f, "records/add?") {
-		t.Fatalf("failover sem DNS: estado %s, pedidos %v", state(a, "vaultwarden"), f.gets)
-	}
-	a.cfg.DNS.Enabled = true
-	a.Tick(at)
-	if !a.st.Services["vaultwarden"].DNS || !hasGet(f, "records/add?") || !hasGet(f, "domain=bitwarden.engmariz.com") {
-		t.Fatalf("DNS ligado com o serviço em failover: o registo não foi criado: %v", f.gets)
+	if s := a.st.Services["vaultwarden"]; s.State != Error || s.Snapshot != "" || !strings.Contains(s.Msg, "token") || f.ran("btrfs subvolume snapshot") >= 0 {
+		t.Fatalf("sem token: estado %s, msg %q, comandos %v", s.State, s.Msg, f.cmds)
 	}
 }
 
@@ -548,5 +555,46 @@ func TestScanImages(t *testing.T) {
 	}
 	if a.st.ImagesMsg != "" || a.st.Events[len(a.st.Events)-1].Msg != "todas as imagens estão no TNAS" {
 		t.Fatalf("não avisou que as imagens voltaram: %q", a.st.ImagesMsg)
+	}
+}
+
+// A config from before DNS was always on still loads; saving drops the old key.
+func TestOldDNSEnabledLoads(t *testing.T) {
+	b, err := os.ReadFile("config/failover.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "failover.yml")
+	old := strings.Replace(string(b), "dns:\n", "dns:\n  enabled: false\n", 1)
+	if err = os.WriteFile(p, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveConfig(p, &c); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); strings.Contains(string(b), "enabled") {
+		t.Fatalf("dns.enabled ficou no ficheiro:\n%s", b)
+	}
+}
+
+// Each box's internet is its own Technitium; the server's is left as it was
+// while the server is down.
+func TestInternetPerBox(t *testing.T) {
+	a, f := setup(t)
+	f.noNet = map[string]bool{a.cfg.Server.IP: true}
+	a.Tick(t0)
+	if a.st.ServerNetOK || !a.st.TNASNetOK || !hasEvent(a, "servidor: sem internet, o DNS não resolve nomes de fora") {
+		t.Fatalf("servidor sem internet: %v %v %v", a.st.ServerNetOK, a.st.TNASNetOK, a.st.Events)
+	}
+	f.noNet = map[string]bool{}
+	f.noPing[a.cfg.Server.IP] = true
+	f.down[a.cfg.Server.NPMCheckHost+"@"+a.cfg.Server.IP] = true
+	a.Tick(t0.Add(time.Minute))
+	if a.st.ServerNetOK {
+		t.Fatal("com o servidor em baixo, a internet dele mudou")
 	}
 }

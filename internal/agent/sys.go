@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -68,6 +69,22 @@ func (RealSys) Check(host, ip string) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// Resolve asks the DNS resolver at ip for a name no cache holds, so the answer
+// has to come from the internet; NXDOMAIN counts as reached.
+func (RealSys) Resolve(ip string) error {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return d.DialContext(ctx, network, net.JoinHostPort(ip, "53"))
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_, err := r.LookupHost(ctx, rand.Text()+".docker.io.") // rooted: no search domains
+	if de, ok := errors.AsType[*net.DNSError](err); ok && de.IsNotFound {
+		return nil
+	}
+	return err
 }
 
 var apiClient = &http.Client{Timeout: 10 * time.Second}

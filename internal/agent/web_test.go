@@ -121,9 +121,8 @@ func TestUI(t *testing.T) {
 	}
 }
 
-// The DNS settings in the UI: the token is tested before it is saved, and DNS
-// cannot be turned off while a service is pointed to the TNAS.
-func TestDNSSettings(t *testing.T) {
+// The Technitium token in the UI is tested before it is saved.
+func TestDNSToken(t *testing.T) {
 	a, f := setup(t)
 	post := func(body string) int {
 		t.Helper()
@@ -131,31 +130,19 @@ func TestDNSSettings(t *testing.T) {
 		a.postDNS(w, httptest.NewRequest(http.MethodPost, "/api/dns", strings.NewReader(body)))
 		return w.Code
 	}
-	saved := func() bool {
-		t.Helper()
-		c, err := LoadConfig(a.cfgPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c.DNS.Enabled
-	}
 	tokFile := a.cfg.DNS.TokenFile
-
-	if post(`{"enabled":false}`) != 204 || a.cfg.DNS.Enabled || saved() {
-		t.Fatal("desligar não ficou aplicado e gravado")
-	}
 	if err := os.Remove(tokFile); err != nil {
 		t.Fatal(err)
 	}
-	if post(`{"enabled":true}`) != 400 || a.cfg.DNS.Enabled {
-		t.Fatal("ligou sem token")
+	if post(`{"token":" "}`) != 400 {
+		t.Fatal("aceitou um token vazio")
 	}
 	f.badToken = "errado"
-	if post(`{"enabled":true,"token":"errado"}`) != 400 || a.cfg.DNS.Enabled || fileExists(tokFile) {
-		t.Fatal("token recusado pelo Technitium mas gravado ou DNS ligado")
+	if post(`{"token":"errado"}`) != 400 || fileExists(tokFile) {
+		t.Fatal("token recusado pelo Technitium mas gravado")
 	}
-	if post(`{"enabled":true,"token":" novo "}`) != 204 || !a.cfg.DNS.Enabled || !saved() || !hasGet(f, "records/get?") {
-		t.Fatalf("token bom: DNS não ligado ou não testado: %v", f.gets)
+	if post(`{"token":" novo "}`) != 204 || !hasGet(f, "records/get?") {
+		t.Fatalf("token bom: não gravado ou não testado: %v", f.gets)
 	}
 	if b, _ := os.ReadFile(tokFile); string(b) != "novo\n" {
 		t.Fatalf("token gravado: %q", b)
@@ -165,11 +152,6 @@ func TestDNSSettings(t *testing.T) {
 	}
 	if v := string(*a.view.Load()); !strings.Contains(v, `"dns_token":true`) || strings.Contains(v, "novo") {
 		t.Fatalf("o estado tem de dizer que há token, sem o mostrar: %s", v)
-	}
-
-	a.st.Services["vaultwarden"] = &SvcState{State: Active, DNS: true}
-	if post(`{"enabled":false}`) != 409 || !a.cfg.DNS.Enabled {
-		t.Fatal("desligou o DNS com um serviço apontado para o TNAS")
 	}
 }
 
@@ -210,12 +192,18 @@ func TestHealthcheck(t *testing.T) {
 	srv := httptest.NewServer(a.Handler())
 	defer srv.Close()
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	if err := Healthcheck("0.0.0.0:" + port); err != nil {
+	if err := Healthcheck("0.0.0.0:"+port, false); err != nil {
 		t.Fatal(err)
 	}
 	srv.Close()
-	if Healthcheck("0.0.0.0:"+port) == nil {
+	if Healthcheck("0.0.0.0:"+port, false) == nil {
 		t.Fatal("healthcheck ok com a interface em baixo")
+	}
+	tsrv := httptest.NewTLSServer(a.Handler()) // certificate for example.com, not 127.0.0.1
+	defer tsrv.Close()
+	_, port, _ = net.SplitHostPort(tsrv.Listener.Addr().String())
+	if err := Healthcheck("0.0.0.0:"+port, true); err != nil {
+		t.Fatal("healthcheck em HTTPS:", err)
 	}
 }
 
@@ -227,8 +215,11 @@ func TestUIURL(t *testing.T) {
 		"[::]:8099":         "http://192.168.1.249:8099",
 		"192.168.1.10:8099": "http://192.168.1.10:8099",
 	} {
-		if got, _ := UIURL(listen, "192.168.1.249"); got != want {
+		if got, _ := UIURL(listen, "192.168.1.249", false); got != want {
 			t.Errorf("%s: %s, queria %s", listen, got, want)
 		}
+	}
+	if got, _ := UIURL(":8099", "192.168.1.249", true); got != "https://192.168.1.249:8099" {
+		t.Errorf("com TLS: %s", got)
 	}
 }

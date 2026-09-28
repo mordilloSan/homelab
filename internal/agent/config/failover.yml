@@ -55,7 +55,6 @@ maintenance:
   default_expiry_min: 60
 
 dns:
-  enabled: false                       # F3: sem DNS · F4: true
   api_url: http://127.0.0.1:5380
   token_file: /config/technitium.token
   zone: engmariz.com
@@ -72,3 +71,5 @@ nightly:
 
 ui:
   listen: 0.0.0.0:8099                 # entra com admin / admin e muda a password na interface
+  tls_cert: ""                         # PEM (fullchain) e chave: os dois dão HTTPS, vazios HTTP
+  tls_key: ""                          # relidos a cada ligação, a renovação não pede reinício

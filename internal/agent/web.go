@@ -1,12 +1,12 @@
 package agent
 
 import (
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -64,8 +64,8 @@ func (a *Agent) Handler() http.Handler {
 }
 
 // UIURL is the address to open the UI at: listen (ui.listen) with host in
-// place of an unspecified address like 0.0.0.0.
-func UIURL(listen, host string) (string, error) {
+// place of an unspecified address like 0.0.0.0, https when the UI has TLS.
+func UIURL(listen, host string, https bool) (string, error) {
 	h, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		return "", err
@@ -73,17 +73,37 @@ func UIURL(listen, host string) (string, error) {
 	if ip := net.ParseIP(h); h == "" || ip != nil && ip.IsUnspecified() {
 		h = host
 	}
-	return "http://" + net.JoinHostPort(h, port), nil
+	scheme := "http://"
+	if https {
+		scheme = "https://"
+	}
+	return scheme + net.JoinHostPort(h, port), nil
+}
+
+// UITLS serves the certificate in certFile/keyFile, read again on every
+// handshake so a renewed certificate is picked up without a restart.
+// ponytail: two file reads per handshake, fine for one admin's browser; cache by mtime if that ever shows.
+func UITLS(certFile, keyFile string) (*tls.Config, error) {
+	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
+		return nil, fmt.Errorf("certificado da interface: %w", err)
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		c, err := tls.LoadX509KeyPair(certFile, keyFile)
+		return &c, err
+	}}, nil
 }
 
 // Healthcheck asks the UI at listen for /healthz, on loopback when it listens
 // everywhere; the image's HEALTHCHECK runs it as "failover-agent healthcheck".
-func Healthcheck(listen string) error {
-	u, err := UIURL(listen, "127.0.0.1")
+func Healthcheck(listen string, https bool) error {
+	u, err := UIURL(listen, "127.0.0.1", https)
 	if err != nil {
 		return err
 	}
-	c := http.Client{Timeout: 5 * time.Second}
+	c := http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+		// Loopback: the certificate names the UI's hostname, not 127.0.0.1.
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: loopback only
+	}}
 	resp, err := c.Get(u + "/healthz")
 	if err != nil {
 		return err
@@ -246,68 +266,34 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 	a.done(w, "", "password da interface alterada")
 }
 
-// postDNS turns DNS on or off and replaces the Technitium token (empty keeps
-// it). The token in effect is tested first, so a wrong one is found here and
-// not in the middle of a failover.
+// postDNS replaces the Technitium token. It is tested first, so a wrong one
+// is found here and not in the middle of a failover.
 func (a *Agent) postDNS(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Enabled bool   `json:"enabled"`
-		Token   string `json:"token"`
+		Token string `json:"token"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	newToken := strings.TrimSpace(req.Token)
+	tok := strings.TrimSpace(req.Token)
+	if tok == "" {
+		http.Error(w, "falta o token do Technitium", http.StatusBadRequest)
+		return
+	}
 	a.mu.Lock()
 	d := a.cfg.DNS
 	a.mu.Unlock()
-	test := newToken // the token in effect after this request
-	if test == "" && req.Enabled {
-		b, _ := os.ReadFile(d.TokenFile)
-		if test = strings.TrimSpace(string(b)); test == "" {
-			http.Error(w, "falta o token do Technitium", http.StatusBadRequest)
-			return
-		}
-	}
-	if test != "" { // outside the lock: the Technitium may take seconds to answer
-		if err := testToken(a.sys, d.APIURL, d.Zone, test); err != nil {
-			http.Error(w, "o Technitium recusou o token: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !req.Enabled && slices.ContainsFunc(a.cfg.Services, func(sv Service) bool { return a.svc(sv.Name).DNS }) {
-		http.Error(w, "há serviços com o DNS a apontar para o TNAS: força o regresso primeiro", http.StatusConflict)
+	// outside the lock: the Technitium may take seconds to answer
+	if err := testToken(a.sys, d.APIURL, d.Zone, tok); err != nil {
+		http.Error(w, "o Technitium recusou o token: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	var msgs []string
-	if newToken != "" {
-		if err := writeAtomic(d.TokenFile, []byte(newToken+"\n")); err != nil {
-			http.Error(w, "guardar o token: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		msgs = append(msgs, "token do Technitium alterado")
-	}
-	if req.Enabled != a.cfg.DNS.Enabled {
-		next := a.cfg
-		next.DNS.Enabled = req.Enabled
-		if err := next.validate(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := saveConfig(a.cfgPath, &next); err != nil {
-			http.Error(w, "guardar configuração: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		a.cfg = next
-		msgs = append(msgs, map[bool]string{true: "DNS ligado", false: "DNS desligado"}[req.Enabled])
-	}
-	if msgs == nil {
-		w.WriteHeader(http.StatusNoContent)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := writeAtomic(d.TokenFile, []byte(tok+"\n")); err != nil {
+		http.Error(w, "guardar o token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	a.now = time.Now()
-	a.done(w, "", strings.Join(msgs, ", "))
+	a.done(w, "", "token do Technitium alterado")
 }
