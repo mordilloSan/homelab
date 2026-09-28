@@ -82,3 +82,16 @@ func TestHealthcheckOwnCert(t *testing.T) {
 		t.Fatalf("%v %v", names, until)
 	}
 }
+
+// A certificate that cannot be written is still served from memory: the UI,
+// and with it the agent, keeps running.
+func TestCertUnwritable(t *testing.T) {
+	ro := t.TempDir()
+	if err := os.Chmod(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(ro, 0o700) }()
+	if _, leaf, err := loadOrCreate(filepath.Join(ro, "certificates"), time.Now(), nil); err != nil || leaf == nil {
+		t.Fatalf("sem poder gravar: %v", err)
+	}
+}

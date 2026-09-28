@@ -53,20 +53,24 @@ func loadOrCreate(dir string, now time.Time, ips []net.IP) (tls.Certificate, *x5
 	} else if fileExists(certPath) || fileExists(keyPath) {
 		slog.Warn("certificado da interface ilegível: vou fazer outro", "dir", dir, "error", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return tls.Certificate{}, nil, fmt.Errorf("pasta do certificado: %w", err)
-	}
 	certPEM, keyPEM, err := makeCert(now, ips)
 	if err != nil {
 		return tls.Certificate{}, nil, err
 	}
-	if err = writeAtomic(keyPath, keyPEM); err != nil {
-		return tls.Certificate{}, nil, fmt.Errorf("guardar a chave: %w", err)
+	// Not saved (a read-only or full disk): serve it from memory all the same,
+	// or the UI, and the agent with it, would not start.
+	err = os.MkdirAll(dir, 0o700)
+	if err == nil {
+		err = writeAtomic(keyPath, keyPEM)
 	}
-	if err = writeAtomic(certPath, certPEM); err != nil {
-		return tls.Certificate{}, nil, fmt.Errorf("guardar o certificado: %w", err)
+	if err == nil {
+		err = writeAtomic(certPath, certPEM)
 	}
-	_ = os.Chmod(certPath, 0o644) // the healthcheck and the user may read it; the key stays 0600
+	if err != nil {
+		slog.Error("guardar o certificado da interface: fica só em memória até ao próximo arranque", "dir", dir, "error", err)
+	} else {
+		_ = os.Chmod(certPath, 0o644) // the healthcheck and the user may read it; the key stays 0600
+	}
 	c, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return tls.Certificate{}, nil, err

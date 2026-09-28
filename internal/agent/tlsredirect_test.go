@@ -57,3 +57,46 @@ func TestRedirectListener(t *testing.T) {
 		t.Fatalf("HTTPS: %d", resp.StatusCode)
 	}
 }
+
+// flakyListener fails its first Accept with a temporary error, like EMFILE.
+type flakyListener struct {
+	net.Listener
+	failed bool
+}
+
+type tempErr struct{}
+
+func (tempErr) Error() string   { return "too many open files" }
+func (tempErr) Timeout() bool   { return false }
+func (tempErr) Temporary() bool { return true }
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	if !l.failed {
+		l.failed = true
+		return nil, tempErr{}
+	}
+	return l.Listener.Accept()
+}
+
+// A temporary accept error does not leave the UI dead.
+func TestRedirectListenerTemporaryError(t *testing.T) {
+	a, _ := setup(t)
+	cfg, err := a.TLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }),
+		ReadHeaderTimeout: time.Second}
+	go func() { _ = srv.Serve(NewRedirectListener(&flakyListener{Listener: ln}, cfg)) }()
+	defer srv.Close()
+	plain := &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := plain.Get("http://" + ln.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("a interface morreu depois de um erro temporário: %v", err)
+	}
+	_ = resp.Body.Close()
+}

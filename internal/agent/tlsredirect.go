@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -51,8 +52,21 @@ func (l *redirectListener) Accept() (net.Conn, error) {
 }
 
 func (l *redirectListener) acceptLoop() {
+	var wait time.Duration
 	for {
 		c, err := l.Listener.Accept()
+		// A temporary error (too many open files) passes: wait and accept
+		// again, as http.Server does, or the UI would be gone for good.
+		if ne, ok := err.(interface{ Temporary() bool }); ok && ne.Temporary() && !errors.Is(err, net.ErrClosed) {
+			wait = min(max(2*wait, 5*time.Millisecond), time.Second)
+			select {
+			case <-time.After(wait):
+				continue
+			case <-l.done:
+				return
+			}
+		}
+		wait = 0
 		if err != nil {
 			l.mu.Lock()
 			l.err = err
