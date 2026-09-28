@@ -24,7 +24,8 @@ func eventsPath(statePath string) string {
 	return filepath.Join(filepath.Dir(statePath), "events.jsonl")
 }
 
-// loadEvents reads the file; a line that does not parse (a write cut short) is skipped.
+// loadEvents reads the file; a line that does not parse (a write cut short)
+// is skipped, and a read error only goes to the log with what came before it.
 func loadEvents(path string) ([]Event, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -40,7 +41,10 @@ func loadEvents(path string) ([]Event, error) {
 			evs = append(evs, e)
 		}
 	}
-	return evs, sc.Err()
+	if err := sc.Err(); err != nil { // e.g. a line over 1 MB: keep what was read, do not stop the agent
+		slog.Error("ler eventos", "file", path, "error", err)
+	}
+	return evs, nil
 }
 
 // event records msg in the log, in memory and at the end of the file. A

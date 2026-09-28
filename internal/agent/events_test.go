@@ -101,3 +101,16 @@ func TestStatusEvents(t *testing.T) {
 		t.Fatalf("eventos no estado: %d (%v)", len(v.Events), err)
 	}
 }
+
+// A line too long to read does not stop the agent from starting: the events
+// before it are kept.
+func TestEventsTooLongLine(t *testing.T) {
+	dir := t.TempDir()
+	writeLines(t, filepath.Join(dir, "events.jsonl"),
+		evLine(time.Now().Add(-time.Hour), "antes"),
+		`{"t":"`+strings.Repeat("x", 2<<20)+`"}`)
+	a := newTestAgent(t, dir, &fake{noPing: map[string]bool{}, down: map[string]bool{}})
+	if len(a.events) != 1 || a.events[0].Msg != "antes" {
+		t.Fatalf("eventos: %+v", a.events)
+	}
+}

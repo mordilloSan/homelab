@@ -892,12 +892,14 @@ const evItem = (e, fresh = false, withSvc = true) => `<li class="ev ${fresh ? 'f
 // first needs it; after that the ones in each status are merged on top.
 let evAll = null, evShown = 100, seen = null, evLoading = false;
 const evKey = e => e.t + e.svc + e.msg;
-async function loadEvents() {
-  if (evAll || evLoading) return;
+// force: fetch again even when loaded (the status skipped some).
+async function loadEvents(force = false) {
+  if ((evAll && !force) || evLoading) return;
   evLoading = true;
   try {
     const r = toLogin(await fetch('api/events', {cache: 'no-store'}));
-    if (r.ok) { evAll = await r.json(); if (st) renderAll(); }
+    // seen = null: what the list gains now is history, not news
+    if (r.ok) { evAll = await r.json(); seen = null; if (st) renderAll(); }
   } finally { evLoading = false; }
 }
 function mergeEvents() {
@@ -905,6 +907,9 @@ function mergeEvents() {
   const known = new Set(evAll.map(evKey));
   const add = (st.events || []).filter(e => !known.has(evKey(e))).reverse();
   if (add.length) evAll = [...add, ...evAll];
+  // none of the status's events was known: more happened than it carries (a
+  // laptop asleep, the agent unreachable), so fetch the whole list again
+  if (evAll.length > add.length && add.length === (st.events || []).length && add.length >= 50) loadEvents(true);
 }
 // newest first, from whichever list is loaded
 const eventsNow = () => evAll || [...(st.events || [])].reverse();
@@ -1085,7 +1090,9 @@ function renderPanel() {
   const p = panel.kind === 'server' ? serverPanel() : panel.kind === 'tnas' ? tnasPanel()
     : svcPanel(st.services.find(s => s.name === panel.name));
   paint('panelHead', p.head);
-  paint('panelBody', p.body);
+  // a list being chosen from must not be replaced under the pointer by the refresh
+  const choosing = document.activeElement?.tagName === 'SELECT' && $('panelBody').contains(document.activeElement);
+  if (!choosing) paint('panelBody', p.body);
   paint('panelFoot', p.foot || '');
   $('panelFoot').hidden = !p.foot;
   fillBeats();
