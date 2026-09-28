@@ -104,16 +104,33 @@ input[type=number] { width: 72px; padding: 5px 8px; border-radius: var(--radius)
   background: var(--well); font-variant-numeric: tabular-nums; }
 input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transparent 60%); }
 
-/* header */
-.top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+/* header: brand, tabs, then status and actions */
+.top { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; }
 .logo { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 26%; color: #fff;
   background: linear-gradient(160deg, #6395e0, var(--primary-dark));
   box-shadow: inset 0 1px 1px rgba(255,255,255,.4), inset 0 -2px 4px rgba(0,0,0,.15), 0 6px 14px -6px rgba(32,82,194,.8); }
 .logo .icon { width: 24px; height: 24px; }
-.brand h1 { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
-.brand p { font-size: 12px; }
-.top-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.brand h1 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+.tabs { display: flex; gap: 2px; }
+.tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; color: var(--muted);
+  text-decoration: none; font-weight: 500; transition: background-color .15s, color .15s; }
+.tabs a:hover { color: var(--text); background: color-mix(in srgb, var(--text), transparent 92%); }
+.tabs a[aria-current] { color: var(--text); background: color-mix(in srgb, var(--text), transparent 88%); }
+.tabs .icon { display: none; }
+.top-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.page { display: grid; gap: 20px; }
+/* settings: an index on the left, the sections on the right */
+.settings { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 20px; align-items: start; }
+.toc { position: sticky; top: 16px; display: grid; gap: 2px; }
+.toc a { padding: 7px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--text); background: color-mix(in srgb, var(--text), transparent 92%); }
+.toc a[aria-current] { color: var(--text); background: color-mix(in srgb, var(--text), transparent 88%); }
+#settingsBody { display: grid; gap: 16px; }
+.set-sec { scroll-margin-top: 16px; }
+.set-sec h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well);
+  font-variant-numeric: tabular-nums; }
 .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-left: 4px; font-variant-numeric: tabular-nums; }
 .live .dot { background: var(--success); }
 .live.stale .dot { background: var(--error); }
@@ -254,7 +271,6 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
   padding-top: 12px; border-top: 1px solid var(--divider); }
 
 /* rules + events */
-.lower { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 0; padding: 0; margin: 0 0 16px; }
 .seg legend { color: var(--muted); font-size: 12px; margin-bottom: 6px; padding: 0; }
 .seg label { display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--divider);
@@ -265,10 +281,6 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .seg label:has(input:checked) { border-color: var(--primary); background: color-mix(in srgb, var(--primary), transparent 85%); }
 .seg label:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
 .field { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-table.rules { width: 100%; border-collapse: collapse; }
-.rules th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 8px 8px 0; }
-.rules td { padding: 8px 8px 8px 0; border-top: 1px solid var(--divider); white-space: nowrap; }
-.rules td:first-child { font-weight: 550; }
 .unit { color: var(--muted); margin-left: 6px; }
 .form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 16px; }
 .form-foot .note { margin-right: auto; color: var(--warning); font-size: 12px; }
@@ -346,6 +358,14 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 .note-text { color: var(--muted) !important; font-size: 12.5px; margin-top: 8px; }
 
 @media (max-width: 860px) {
+  .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; justify-content: space-around;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--paper); border-top: 1px solid var(--divider); }
+  .tabs a { flex-direction: column; gap: 2px; padding: 6px 12px; font-size: 11.5px; }
+  .tabs .icon { display: block; }
+  main { padding-bottom: 88px; }
+  .toasts { bottom: 84px; }
+  .settings { grid-template-columns: minmax(0, 1fr); }
+  .toc { display: none; }
   .lower { grid-template-columns: minmax(0, 1fr); }
   .topo { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clients" "server" "lane" "tnas" "internet"; row-gap: 0; }
   #internet { margin: 14px 0 0; }
@@ -366,25 +386,28 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   @keyframes packet-v { from { top: 0; } to { top: calc(100% - 8px); } }
   dialog.sheet { border-radius: 0; }
 }
-@media (max-width: 420px) { .grid { grid-template-columns: minmax(0, 1fr); } .seg { grid-template-columns: 1fr; } .rules input[type=number] { width: 52px; } }
+@media (max-width: 420px) { .grid { grid-template-columns: minmax(0, 1fr); } .seg { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
   <header class="top">
-    <div class="brand">
-      <span class="logo" data-icon="swap"></span>
-      <div><h1>Failover do homelab</h1><p class="muted" id="subtitle">Servidor e TNAS</p></div>
-    </div>
+    <div class="brand"><span class="logo" data-icon="swap"></span><h1>Failover do homelab</h1></div>
+    <nav class="tabs" aria-label="Secções">
+      <a href="#/" data-tab="overview"><span data-icon="dashboard"></span>Visão geral</a>
+      <a href="#/eventos" data-tab="events"><span data-icon="clock"></span>Eventos</a>
+      <a href="#/definicoes" data-tab="settings"><span data-icon="cog"></span>Definições</a>
+    </nav>
     <div class="top-meta">
       <span class="chip" id="modeChip"></span>
       <span class="live" id="live"><span class="dot"></span><span id="liveText">A ligar ao agente…</span></span>
-      <button class="icon-btn" id="settingsOpen" aria-label="Definições" title="Definições: conta e DNS" aria-haspopup="dialog" data-icon="cog"></button>
+      <a class="icon-btn" href="#/definicoes" aria-label="Definições" title="Definições" data-icon="cog"></a>
       <button class="icon-btn" data-logout aria-label="Sair" title="Sair (sai sozinho após 30 min sem atividade)" data-icon="logout"></button>
     </div>
   </header>
 
+  <section class="page" id="page-overview">
   <div class="banner" id="banner" role="alert" hidden><span data-icon="alert"></span><div id="bannerText"></div></div>
   <div class="banner" id="pwBanner" role="alert" style="--c:var(--warning)" hidden><span data-icon="key"></span>
     <div>A interface ainda usa o utilizador e a password por defeito (admin / admin). <button class="btn" id="pwBannerBtn">Mudar password</button></div></div>
@@ -408,33 +431,27 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span></div>
   <div class="grid" id="svcs"></div>
 
-  <div class="lower">
-    <section class="card" aria-labelledby="rulesTitle">
-      <div class="card-head"><h2 id="rulesTitle">Regras</h2></div>
-      <form id="cfg" autocomplete="off">
-        <fieldset class="seg">
-          <legend>Modo</legend>
-          <label><input type="radio" name="mode" value="observe"><strong>Observação</strong><small>Só regista o que faria</small></label>
-          <label><input type="radio" name="mode" value="auto"><strong>Automático</strong><small>Faz failover e regresso sozinho</small></label>
-        </fieldset>
-        <label class="field">Verificar a cada <input type="number" id="interval" min="10"> segundos</label>
-        <table class="rules">
-          <thead><tr><th>Serviço</th><th>Espera antes do failover</th><th>Estabilidade antes do regresso</th></tr></thead>
-          <tbody id="cfgSvcs"></tbody>
-        </table>
-        <div class="form-foot">
-          <span class="note" id="dirty" hidden>Alterações por guardar</span>
-          <button type="button" class="btn" id="reset">Repor</button>
-          <button type="submit" class="btn contained" id="save" disabled>Guardar alterações</button>
-        </div>
-      </form>
-    </section>
+  </section>
 
-    <section class="card" aria-labelledby="eventsTitle">
-      <div class="card-head"><h2 id="eventsTitle">Eventos</h2><span class="spacer"></span><span class="muted" id="evCount"></span></div>
+  <section class="page" id="page-events" hidden>
+    <div class="card">
+      <div class="card-head"><h2>Eventos</h2><span class="spacer"></span><span class="muted" id="evCount"></span></div>
+      <div class="ev-filters" id="evFilters"></div>
       <ol class="timeline" id="events"></ol>
-    </section>
-  </div>
+      <div id="evMore"></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-settings" hidden>
+    <div class="settings">
+      <nav class="toc" aria-label="Secções das definições">
+        <a href="#/definicoes/geral" data-sub="geral">Geral</a>
+        <a href="#/definicoes/dns" data-sub="dns">DNS</a>
+        <a href="#/definicoes/conta" data-sub="conta">Conta</a>
+      </nav>
+      <div id="settingsBody"></div>
+    </div>
+  </section>
 </main>
 
 <dialog id="confirm">
@@ -718,8 +735,6 @@ function renderTopology() {
 
   paint('router', `${chip(st.router_ok ? 'Router acessível' : 'Router inacessível', st.router_ok ? 'var(--success)' : 'var(--error)', st.router_ok ? 'xs quiet' : 'xs')}<span class="mono muted">${esc(st.router_ip)}</span>`);
   probePulse();
-  const away = at.tnas.length + at.moving.length;
-  $('subtitle').textContent = away ? `${away} de ${st.services.length} serviços fora do servidor` : 'Todos os serviços no servidor';
 }
 
 // Each box's internet, as its Technitium last answered; unknown while the box
@@ -733,6 +748,7 @@ const netState = () => ({
 // server unless a service's A record points at the TNAS. Packets travel along
 // the wires that carry traffic.
 function renderWires() {
+  if ($('page-overview').hidden) return;
   const svg = $('wires'), topo = $('topo');
   if (getComputedStyle(svg).display === 'none') return;
   const box = topo.getBoundingClientRect();
@@ -981,26 +997,41 @@ function svcPanel(s) {
   };
 }
 
-// Settings: the account and DNS. Only fields that rarely change go in the HTML,
-// so the refresh does not repaint it while a token is being typed.
-function settingsPanel() {
-  return {
-    head: `<span class="node-icon">${icon('cog')}</span><div class="node-id"><h2 id="panelTitle">Definições</h2><span class="muted">Conta e DNS</span></div>`,
-    body: sec('Conta', kv([['Utilizador', mono(st.user)]])
-        + `<div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>`)
-      + sec('DNS (Technitium)', `<p class="note-text">O agente aponta o nome de um serviço para o TNAS quando a cópia fica pronta, e repõe-no no regresso.</p>`
-        + kv([['Zona', mono(st.dns_zone)], ['API', mono(st.dns_api_url)],
-          ['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])
-        + `<form id="tokenForm"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
-            <input type="password" id="dnsToken" autocomplete="off" required></label>
-          <p class="bad-text" id="tokenErr" role="alert"></p>
-          <div class="form-foot"><button type="submit" class="btn contained" id="tokenSave">Testar e gravar</button></div></form>`),
-  };
+// Settings, as a page. Only values that rarely change go in the markup, so
+// the 5 s refresh does not repaint it while the token is being typed.
+const INTERVALS = [10, 15, 30, 60, 120, 300];
+const secs = v => v % 60 ? `${v} s` : `${v / 60} min`;
+function renderSettings() {
+  const mode = pending.has('mode') ? pending.get('mode') : st.mode;
+  const iv = pending.has('interval') ? pending.get('interval') : st.check_interval_s;
+  const ivs = [...new Set([...INTERVALS, iv])].sort((a, b) => a - b);
+  paint('settingsBody', `
+    <section class="card set-sec" id="set-geral"><h2>Geral</h2>
+      <fieldset class="seg" ${pending.has('mode') ? 'disabled' : ''}><legend>Modo</legend>
+        <label><input type="radio" name="mode" value="observe" ${mode === 'observe' ? 'checked' : ''}><strong>Observação</strong><small>Só regista o que faria</small></label>
+        <label><input type="radio" name="mode" value="auto" ${mode === 'auto' ? 'checked' : ''}><strong>Automático</strong><small>Faz failover e regresso sozinho</small></label>
+      </fieldset>
+      <label class="field">Verificar o servidor a cada <select id="interval" ${pending.has('interval') ? 'disabled' : ''}>
+        ${ivs.map(v => `<option value="${v}" ${v === iv ? 'selected' : ''}>${secs(v)}</option>`).join('')}</select></label>
+    </section>
+    <section class="card set-sec" id="set-dns"><h2>DNS (Technitium)</h2>
+      <p class="note-text">O agente aponta o nome de um serviço para o TNAS quando a cópia fica pronta, e repõe-no no regresso.</p>
+      ${kv([['Zona', mono(st.dns_zone)], ['API', mono(st.dns_api_url)],
+        ['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
+      <form id="tokenForm"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
+          <input type="password" id="dnsToken" autocomplete="off" required></label>
+        <p class="bad-text" id="tokenErr" role="alert"></p>
+        <div class="form-foot"><button type="submit" class="btn contained" id="tokenSave">Testar e gravar</button></div></form>
+    </section>
+    <section class="card set-sec" id="set-conta"><h2>Conta</h2>
+      ${kv([['Utilizador', mono(st.user)]])}
+      <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>
+    </section>`);
 }
 
 function renderPanel() {
   if (!panel || !st) return;
-  const p = panel.kind === 'settings' ? settingsPanel() : panel.kind === 'server' ? serverPanel() : panel.kind === 'tnas' ? tnasPanel()
+  const p = panel.kind === 'server' ? serverPanel() : panel.kind === 'tnas' ? tnasPanel()
     : svcPanel(st.services.find(s => s.name === panel.name));
   paint('panelHead', p.head);
   paint('panelBody', p.body);
@@ -1009,33 +1040,6 @@ function renderPanel() {
   fillBeats();
 }
 
-// The rules form is filled only on demand, so the refresh never overwrites what is being typed.
-function fillForm() {
-  document.querySelector(`input[name=mode][value=${st.mode}]`).checked = true;
-  $('interval').value = st.check_interval_s;
-  $('cfgSvcs').innerHTML = st.services.map(s => `<tr data-name="${esc(s.name)}">
-    <td>${esc(s.name)}</td>
-    <td><input type="number" min="1" value="${s.wait_min}" aria-label="Espera de ${esc(s.name)} em minutos"><span class="unit">min</span></td>
-    <td><input type="number" min="0" value="${s.stability_min}" aria-label="Estabilidade de ${esc(s.name)} em minutos"><span class="unit">min</span></td></tr>`).join('');
-  markDirty();
-}
-function formValue() {
-  return {
-    mode: document.querySelector('input[name=mode]:checked')?.value,
-    check_interval_s: Number($('interval').value),
-    services: [...$('cfgSvcs').querySelectorAll('tr')].map(tr => {
-      const [w, s] = tr.querySelectorAll('input');
-      return {name: tr.dataset.name, wait_min: Number(w.value), stability_min: Number(s.value)};
-    }),
-  };
-}
-function markDirty() {
-  const saved = {mode: st.mode, check_interval_s: st.check_interval_s,
-    services: st.services.map(s => ({name: s.name, wait_min: s.wait_min, stability_min: s.stability_min}))};
-  const dirty = JSON.stringify(formValue()) !== JSON.stringify(saved);
-  $('dirty').hidden = !dirty;
-  $('save').disabled = !dirty;
-}
 
 function toast(msg, ok = true) {
   const el = document.createElement('div');
@@ -1046,7 +1050,7 @@ function toast(msg, ok = true) {
   setTimeout(() => el.remove(), ok ? 4000 : 9000);
 }
 
-function renderAll() { renderGlobal(); renderTopology(); renderServices(); renderEvents(); renderPanel(); }
+function renderAll() { renderGlobal(); renderTopology(); renderServices(); renderEvents(); renderSettings(); renderPanel(); }
 
 async function post(path, body, done, key, value = true) {
   pending.set(key, value);
@@ -1090,7 +1094,7 @@ async function refresh() {
     void live.offsetWidth; // restart the ripple
     live.classList.add('ping');
     renderAll();
-    if (first) { $('maintMin').value = st.default_expiry_min || 60; fillForm(); }
+    if (first) { $('maintMin').value = st.default_expiry_min || 60; route(); }
   } catch (e) {
     lastOk = lastOk || -1;
   }
@@ -1124,6 +1128,22 @@ document.addEventListener('click', async e => {
 });
 
 document.addEventListener('change', async e => {
+  if (e.target.name === 'mode') {
+    const mode = e.target.value;
+    if (mode === 'auto' && !await confirmAction('Passar para automático?',
+      'O agente passa a fazer failover e regresso sozinho, sem pedir confirmação.', 'Passar para automático')) {
+      painted.settingsBody = null; // put the radio back on what the agent has
+      renderSettings();
+      return;
+    }
+    post('api/config', {mode}, mode === 'auto' ? 'Modo automático ligado' : 'Modo observação ligado', 'mode', mode);
+    return;
+  }
+  if (e.target.id === 'interval') {
+    const v = Number(e.target.value);
+    post('api/config', {check_interval_s: v}, `Verificação a cada ${secs(v)}`, 'interval', v);
+    return;
+  }
   const sw = e.target.closest('input.switch');
   if (!sw) return;
   const svc = sw.id === 'maintGlobal' ? '' : sw.dataset.maint;
@@ -1154,7 +1174,6 @@ async function logout() {
   await fetch('api/logout', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
   location.href = 'login';
 }
-$('settingsOpen').addEventListener('click', () => openPanel('settings'));
 // The token form is in the settings panel, drawn after this runs.
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'tokenForm') return;
@@ -1196,16 +1215,23 @@ $('pwForm').addEventListener('submit', async e => {
 $('panel').addEventListener('close', () => { panel = null; });
 $('panel').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // click on the backdrop
 $('panelClose').addEventListener('click', () => $('panel').close());
-$('cfg').addEventListener('input', markDirty);
-$('cfg').addEventListener('submit', async e => {
-  e.preventDefault();
-  $('save').disabled = true;
-  $('save').textContent = 'A guardar…';
-  const ok = await post('api/config', formValue(), 'Alterações guardadas', 'config');
-  $('save').textContent = 'Guardar alterações';
-  if (ok) fillForm(); else markDirty();
-});
-$('reset').addEventListener('click', fillForm);
+
+// The tab is in the address (#/eventos, #/definicoes/dns), so a reload or a
+// link from elsewhere opens it and the browser's back button moves between tabs.
+const ROUTES = {'': 'overview', eventos: 'events', definicoes: 'settings'};
+const hashParts = () => location.hash.replace(/^#\/?/, '').split('/');
+const currentTab = () => ROUTES[hashParts()[0]] || 'overview';
+function route() {
+  const tab = currentTab(), sub = hashParts()[1] || 'geral';
+  document.querySelectorAll('.page').forEach(p => { p.hidden = p.id !== `page-${tab}`; });
+  document.querySelectorAll('[data-tab]').forEach(a => a.dataset.tab === tab ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+  document.querySelectorAll('[data-sub]').forEach(a => tab === 'settings' && a.dataset.sub === sub ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current'));
+  if (st) renderAll();
+  if (tab === 'settings') $(`set-${sub}`)?.scrollIntoView({block: 'start'});
+  if (tab === 'overview') requestAnimationFrame(() => st && renderWires()); // it had no size while hidden
+}
+addEventListener('hashchange', route);
+route();
 
 new ResizeObserver(() => st && renderWires()).observe($('topo'));
 refresh();
