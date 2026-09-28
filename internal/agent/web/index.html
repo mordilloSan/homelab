@@ -237,38 +237,37 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .duration { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 
 /* services */
-.section-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 4px -4px; }
-.section-head h2 { font-size: 16px; font-weight: 600; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 4px 4px -4px; }
+.section-head h2 { font-size: 15px; font-weight: 600; }
+.section-head #svcSearch { margin-left: auto; width: min(240px, 40vw); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider);
+  background: var(--well); }
+.section-head #svcSearch[hidden] + .btn { margin-left: auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .svc { --accent: var(--success); display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px;
   border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 16px; }
 .svc.alert { border-bottom-color: var(--accent); }
-.svc-head { display: flex; align-items: flex-start; gap: 12px; }
+.svc { cursor: pointer; gap: 10px; padding: 14px; border-radius: 12px; transition: border-color .5s, background-color .15s; }
+.svc:hover { background-color: color-mix(in srgb, var(--text), transparent 96%); }
+.svc-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.svc-top h3 { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-top .svc-icon { width: 30px; height: 30px; border-radius: 8px; }
+.svc-top .svc-icon .icon { width: 18px; height: 18px; }
+.svc-top .sdot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--accent); }
+.svc-line { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .svc-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 26%; flex: none; color: var(--accent);
   background: color-mix(in srgb, var(--accent), transparent 86%); }
 .svc-icon .icon { width: 22px; height: 22px; }
-.svc-id { min-width: 0; flex: 1; }
-.svc-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; }
-.svc-id h3 { font-size: 15px; font-weight: 600; white-space: nowrap; }
 .svc-open { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: inherit;
   font: inherit; cursor: pointer; }
 .svc-open:hover { color: var(--primary); }
-.meta dd.warn { color: var(--warning); }
-.svc-id .mono { color: var(--muted); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status { display: grid; gap: 8px; }
 .status p { color: var(--text); }
 .status.tone-error p { color: var(--error); }
 .bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text), transparent 90%); overflow: hidden; }
 .bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .6s ease; }
-.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; }
-.meta div { display: grid; }
-.meta dt { color: var(--muted); font-size: 11.5px; }
-.meta dd { margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; }
 .snap { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-md); background: var(--well); min-width: 0; }
 .snap .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snap .icon { width: 16px; height: 16px; color: var(--muted); }
-.svc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: auto;
-  padding-top: 12px; border-top: 1px solid var(--divider); }
 
 /* rules + events */
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 0; padding: 0; margin: 0 0 16px; }
@@ -428,7 +427,9 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
     </div>
   </section>
 
-  <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span></div>
+  <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span>
+    <input type="search" id="svcSearch" placeholder="Procurar serviço…" aria-label="Procurar serviço" hidden>
+    <button class="btn contained" disabled title="Em breve">+ Adicionar serviço</button></div>
   <div class="grid" id="svcs"></div>
 
   </section>
@@ -508,6 +509,8 @@ const look = s => s.state === 'NORMAL' && st.router_ok && !s.server_ok
   ? {label: 'Em falha', c: 'var(--warning)'} : STATES[s.state] || STATES.ERROR;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+// for search: no case, no accents
+const norm = s => String(s ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name] || ICONS.cube}"/></svg>`;
 const minsSince = t => (Date.now() - Date.parse(t)) / 60000;
 const dur = m => {
@@ -841,38 +844,25 @@ const actions = s => {
   return `${maintSwitch(s)}<span>${actionButton(s, 'failover', canFail)} ${actionButton(s, 'return', canReturn)}</span>`;
 };
 
-function imagesDD(name) {
-  const c = imgCount([name]);
-  if (!c.known) return {v: '—'};
-  if (c.unreadable) return {v: 'compose ilegível', warn: true};
-  if (c.missing) return {v: `${c.missing} em falta`, warn: true};
-  return {v: c.total ? `${c.present} no TNAS` : 'nenhuma'};
-}
-
+// Compact cards: what it is, where it runs, how the last checks went. Everything else is in its panel.
+const lastMs = name => { const b = st.beats?.[name]; const l = b?.[b.length - 1]; return l?.s === 'up' ? ` · ${l.ms} ms` : ''; };
 function renderServices() {
-  const out = st.services.map(s => {
+  const q = norm($('svcSearch').value.trim());
+  $('svcSearch').hidden = st.services.length < 8;
+  const shown = st.services.filter(s => !q || norm(s.name).includes(q) || norm(s.host).includes(q));
+  paint('svcs', shown.map(s => {
     const S = look(s);
-    const img = imagesDD(s.name);
-    const meta = [{k: 'Espera', v: `${s.wait_min} min`}, {k: 'Estabilidade', v: `${s.stability_min} min`}, {k: 'Imagens', ...img}];
-    if (s.since) meta.push({k: 'Neste estado', v: dur(minsSince(s.since))});
-    return `<article class="card svc ${s.state !== 'NORMAL' || !s.server_ok ? 'alert' : ''}" id="svc-${esc(s.name)}" style="--accent:${S.c}">
-      <header class="svc-head">
-        <span class="svc-icon">${icon(SVC_ICON[s.name])}</span>
-        <div class="svc-id"><div class="svc-title"><h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}</button></h3>
-          ${chip(S.label, S.c, S.busy ? 'busy' : fine(s) ? 'quiet' : '')}</div>
-          <span class="mono" title="${esc(s.host)}">${esc(s.host)}</span></div>
-      </header>
-      ${statusBlock(s)}
-      <div class="svc-beats">${beatsBlock(s.name)}</div>
-      <dl class="meta">${meta.map(m => `<div><dt>${m.k}</dt><dd class="${m.warn ? 'warn' : ''}">${esc(m.v)}</dd></div>`).join('')}</dl>
-      ${s.snapshot ? `<div class="snap" title="${esc(s.snapshot)}">${icon('layers')}<span class="mono">${esc(s.snapshot.split('/').pop())}</span>${s.dns ? chip('DNS → TNAS', 'var(--info)', 'xs') : ''}</div>` : ''}
-      <footer class="svc-foot">${actions(s)}</footer>
+    return `<article class="card svc ${fine(s) ? '' : 'alert'}" id="svc-${esc(s.name)}" data-panel="svc" data-svc="${esc(s.name)}" style="--accent:${S.c}">
+      <div class="svc-top"><span class="svc-icon">${icon(SVC_ICON[s.name])}</span>
+        <h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}</button></h3>
+        <span class="sdot" title="${esc(S.label)}"></span></div>
+      ${fine(s) ? `<p class="svc-line">No servidor${lastMs(s.name)}</p>` : statusBlock(s)}
+      <div class="beats" data-beats="${esc(s.name)}" role="img" aria-label="Últimas verificações"></div>
     </article>`;
-  }).join('');
-  paint('svcs', out);
+  }).join('') || '<p class="empty">Nenhum serviço com esse nome.</p>');
   fillBeats();
   const away = st.services.filter(s => s.state !== 'NORMAL').length;
-  $('svcCount').textContent = `${st.services.length} serviços${away ? `, ${away} fora do normal` : ''}`;
+  $('svcCount').textContent = `${st.services.length}${away ? `, ${away} fora do normal` : ''}`;
 }
 
 function evTone(m) {
@@ -969,6 +959,15 @@ function tnasPanel() {
   };
 }
 
+// Wait and stability as lists; a value from the file that is not in the list still shows.
+const MINUTES = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60];
+function minuteSelect(s, field, min) {
+  const key = `${field}:${s.name}`, v = pending.has(key) ? pending.get(key) : s[field];
+  const opts = [...new Set([...MINUTES.filter(m => m >= min), v])].sort((a, b) => a - b);
+  return `<select data-min="${field}" data-svc="${esc(s.name)}" ${pending.has(key) ? 'disabled' : ''}>
+    ${opts.map(m => `<option value="${m}" ${m === v ? 'selected' : ''}>${m} min</option>`).join('')}</select>`;
+}
+
 function svcPanel(s) {
   if (!s) return {head: '', body: ''};
   const S = look(s);
@@ -981,8 +980,8 @@ function svcPanel(s) {
         ['Pasta no espelho', mono(s.dir)],
         ['Override', s.override ? mono(s.override) : 'Nenhum, usa o compose tal como está'],
         s.require_free_ip && ['IP que tem de estar livre', mono(s.require_free_ip)],
-        ['Espera antes do failover', `${s.wait_min} min`],
-        ['Estabilidade antes do regresso', `${s.stability_min} min`],
+        ['Espera antes do failover', minuteSelect(s, 'wait_min', 1)],
+        ['Estabilidade antes do regresso', minuteSelect(s, 'stability_min', 0)],
         ['Manutenção', s.maint_until ? `Ligada até ${esc(clock(s.maint_until))}` : st.maint_until ? 'Global ligada' : 'Desligada'],
       ]))
       + (s.snapshot || s.dns ? sec('Cópia no TNAS', kv([
@@ -1128,6 +1127,12 @@ document.addEventListener('click', async e => {
 });
 
 document.addEventListener('change', async e => {
+  const sel = e.target.closest('select[data-min]');
+  if (sel) {
+    const v = Number(sel.value), field = sel.dataset.min, name = sel.dataset.svc;
+    post('api/config', {services: [{name, [field]: v}]}, 'Guardado', `${field}:${name}`, v);
+    return;
+  }
   if (e.target.name === 'mode') {
     const mode = e.target.value;
     if (mode === 'auto' && !await confirmAction('Passar para automático?',
@@ -1194,6 +1199,7 @@ document.addEventListener('submit', async e => {
   }
 });
 $('pwBannerBtn').addEventListener('click', openPw);
+$('svcSearch').addEventListener('input', renderServices);
 $('pwCancel').addEventListener('click', () => $('pwDlg').close());
 $('pwForm').addEventListener('submit', async e => {
   e.preventDefault();
