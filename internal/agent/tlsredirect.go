@@ -111,7 +111,7 @@ func redirect(c net.Conn) {
 	if err != nil || req.Host == "" {
 		return
 	}
-	target := "https://" + req.Host + req.RequestURI
+	target := "https://" + req.Host + req.URL.RequestURI() // the path even of GET http://host/path
 	_, _ = fmt.Fprintf(c, "HTTP/1.1 301 Moved Permanently\r\nLocation: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", target)
 }
 

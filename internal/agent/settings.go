@@ -149,7 +149,7 @@ func (a *Agent) postSection(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := next.validate(); err != nil {
 		var fe *FieldError
-		if errors.As(err, &fe) {
+		if errors.As(err, &fe) && slices.ContainsFunc(settings, func(s setting) bool { return s.key == fe.Field && s.section == req.Section }) {
 			fieldErr(w, fe.Field, fe.Msg)
 		} else {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

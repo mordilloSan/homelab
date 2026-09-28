@@ -59,10 +59,21 @@ func (a *Agent) event(svc, msg string) {
 	}
 	a.evMu.Unlock()
 	b, _ := json.Marshal(e)
-	f, err := os.OpenFile(a.eventsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	created := !fileExists(a.eventsPath)
+	f, err := os.OpenFile(a.eventsPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
 	if err == nil {
+		// a line cut short (a crash, a full disk) is ended first, so this one stays readable
+		last := make([]byte, 1)
+		if fi, serr := f.Stat(); serr == nil && fi.Size() > 0 {
+			if _, rerr := f.ReadAt(last, fi.Size()-1); rerr == nil && last[0] != '\n' {
+				b = append([]byte{'\n'}, b...)
+			}
+		}
 		_, err = f.Write(append(b, '\n'))
 		err = cmp.Or(err, f.Close())
+		if created {
+			chownLikeDir(a.eventsPath)
+		}
 	}
 	if err != nil {
 		slog.Error("guardar evento", "error", err)
@@ -95,7 +106,7 @@ func (a *Agent) trimEvents() {
 // so the page gets it even while a tick holds mu through a compose up.
 func (a *Agent) eventsSnapshot() []Event {
 	a.evMu.Lock()
-	evs := slices.Clone(a.events)
+	evs := append([]Event{}, a.events...) // [] and not null with none
 	a.evMu.Unlock()
 	slices.Reverse(evs)
 	return evs

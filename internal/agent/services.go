@@ -90,6 +90,36 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The override is checked with docker compose before the lock too: it
+	// runs a process. Only putting the checked file in place happens under it.
+	yml := strings.TrimSpace(req.OverrideYAML)
+	a.mu.Lock()
+	paths, before, existed := a.cfg.Paths, Service{}, false
+	if j := slices.IndexFunc(a.cfg.Services, func(s Service) bool { return s.Name == req.Name }); j >= 0 {
+		before, existed = a.cfg.Services[j], true
+	}
+	a.mu.Unlock()
+	if !validName.MatchString(req.Name) || req.Name == "npm" {
+		fieldErr(w, "name", "só minúsculas, números, - e _, a começar por letra ou número (npm está reservado)")
+		return
+	}
+	file := req.Name + ".override.yml"
+	if existed && before.Override != "" {
+		file = before.Override
+	}
+	var checked string // a checked override, waiting to be put in place
+	if yml != "" && (!existed || !sameOverride(paths.OverridesDir, before, yml) || strings.TrimSpace(req.Dir) != before.Dir) {
+		compose := filepath.Join(paths.MirrorSubvol, paths.MirrorRoot, strings.TrimSpace(req.Dir), "docker-compose.yml")
+		if !isRel(strings.TrimSpace(req.Dir)) || !fileExists(compose) {
+			fieldErr(w, "dir", "não há docker-compose.yml nesta pasta do espelho")
+			return
+		}
+		var ok bool
+		if checked, ok = a.checkOverride(w, paths.OverridesDir, req.Name, file, compose, yml); !ok {
+			return
+		}
+		defer func() { _ = os.Remove(checked) }() // gone by rename when used
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	i := slices.IndexFunc(a.cfg.Services, func(s Service) bool { return s.Name == req.Name })
@@ -103,7 +133,6 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	}
 	sv := Service{Name: req.Name, Dir: strings.TrimSpace(req.Dir), Host: strings.TrimSpace(req.Host), WaitMin: req.WaitMin,
 		StabilityMin: req.StabilityMin, Icon: req.Icon, RequireFreeIP: strings.TrimSpace(req.RequireFreeIP)}
-	yml := strings.TrimSpace(req.OverrideYAML)
 	var old Service
 	if i >= 0 {
 		old = a.cfg.Services[i]
@@ -111,16 +140,8 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	if yml != "" {
 		sv.Override = cmp.Or(old.Override, sv.Name+".override.yml")
 	}
-	// The override as it is: a save that leaves it alone neither rewrites it
-	// nor runs compose on it. CRLF (edited from Windows) reads as LF, as the
-	// browser's textarea does.
-	var cur []byte
-	if old.Override != "" {
-		cur, _ = os.ReadFile(filepath.Join(a.cfg.Paths.OverridesDir, old.Override))
-	}
-	sameOverride := yml == strings.TrimSpace(strings.ReplaceAll(string(cur), "\r\n", "\n")) && (yml == "" || old.Override != "")
 	if i >= 0 && a.svc(sv.Name).State != Normal {
-		if sv.Dir != old.Dir || sv.Host != old.Host || sv.RequireFreeIP != old.RequireFreeIP || !sameOverride {
+		if sv.Dir != old.Dir || sv.Host != old.Host || sv.RequireFreeIP != old.RequireFreeIP || !sameOverride(a.cfg.Paths.OverridesDir, old, yml) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a pasta, o endereço, o override e o IP só mudam com o serviço no servidor"})
 			return
 		}
@@ -147,9 +168,10 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	undo := func() {}
-	if yml != "" && (!sameOverride || sv.Dir != old.Dir) { // a new folder is checked against the override
-		var ok bool
-		if undo, ok = a.writeOverride(w, next.Paths.OverridesDir, sv, compose, yml); !ok {
+	if checked != "" {
+		var err error
+		if undo, err = placeOverride(checked, filepath.Join(next.Paths.OverridesDir, sv.Override)); err != nil {
+			fieldErr(w, "override_yaml", "gravar o override: "+err.Error())
 			return
 		}
 	}
@@ -176,9 +198,20 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	a.done(w, sv.Name, map[bool]string{true: "serviço adicionado", false: "serviço alterado"}[req.New])
 }
 
-// writeOverride checks yml as YAML and with docker compose, then puts it in
-// place. undo puts back what was there, for when the config cannot be saved.
-func (a *Agent) writeOverride(w http.ResponseWriter, dir string, sv Service, compose, yml string) (undo func(), ok bool) {
+// sameOverride: yml is what the service's override already says. A save that
+// leaves it alone neither rewrites it nor runs compose on it. CRLF (edited
+// from Windows) reads as LF, as the browser's textarea does.
+func sameOverride(overridesDir string, old Service, yml string) bool {
+	if old.Override == "" {
+		return yml == ""
+	}
+	cur, _ := os.ReadFile(filepath.Join(overridesDir, old.Override))
+	return yml == strings.TrimSpace(strings.ReplaceAll(string(cur), "\r\n", "\n"))
+}
+
+// checkOverride checks yml as YAML and with docker compose against the
+// service's compose, in a file beside the final one, and returns that file.
+func (a *Agent) checkOverride(w http.ResponseWriter, dir, name, file, compose, yml string) (string, bool) {
 	var m map[string]any
 	if err := yaml.Unmarshal([]byte(yml), &m); err != nil || m == nil {
 		msg := "tem de ser um YAML com as chaves do compose"
@@ -186,28 +219,31 @@ func (a *Agent) writeOverride(w http.ResponseWriter, dir string, sv Service, com
 			msg = "YAML inválido: " + err.Error()
 		}
 		fieldErr(w, "override_yaml", msg)
-		return nil, false
+		return "", false
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fieldErr(w, "override_yaml", "criar a pasta dos overrides: "+err.Error())
-		return nil, false
+		return "", false
 	}
-	final := filepath.Join(dir, sv.Override)
-	tmp := filepath.Join(dir, "."+sv.Override+".check")
+	tmp := filepath.Join(dir, "."+file+".check")
 	if err := writeAtomic(tmp, []byte(yml+"\n")); err != nil {
 		fieldErr(w, "override_yaml", "gravar o override: "+err.Error())
-		return nil, false
+		return "", false
 	}
-	if err := a.sys.Run("docker", "compose", "-p", "failover-"+sv.Name, "-f", compose, "-f", tmp, "config", "-q"); err != nil {
+	if err := a.sys.Run("docker", "compose", "-p", "failover-"+name, "-f", compose, "-f", tmp, "config", "-q"); err != nil {
 		_ = os.Remove(tmp)
 		fieldErr(w, "override_yaml", "o docker compose recusou-o: "+err.Error())
-		return nil, false
+		return "", false
 	}
+	return tmp, true
+}
+
+// placeOverride puts a checked override in place; undo puts back what was
+// there, for when the config cannot be saved.
+func placeOverride(checked, final string) (undo func(), err error) {
 	prev, prevErr := os.ReadFile(final)
-	if err := os.Rename(tmp, final); err != nil {
-		_ = os.Remove(tmp)
-		fieldErr(w, "override_yaml", "gravar o override: "+err.Error())
-		return nil, false
+	if err = os.Rename(checked, final); err != nil {
+		return nil, err
 	}
 	return func() {
 		if prevErr == nil {
@@ -215,7 +251,7 @@ func (a *Agent) writeOverride(w http.ResponseWriter, dir string, sv Service, com
 		} else {
 			_ = os.Remove(final)
 		}
-	}, true
+	}, nil
 }
 
 // postServiceRemove takes a service out of the config, the state and the

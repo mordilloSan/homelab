@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -343,4 +344,19 @@ func (a *Agent) postDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	a.now = time.Now()
 	a.done(w, "", "token do Technitium alterado")
+}
+
+// The address the UI is on, kept next to the state: after a new ui.listen is
+// saved, the healthcheck still asks the running one until the restart.
+func runningFile(statePath string) string { return filepath.Join(filepath.Dir(statePath), "ui-listen") }
+
+func SetRunningListen(statePath, addr string) error {
+	return writeAtomic(runningFile(statePath), []byte(addr))
+}
+
+func RunningListen(statePath, fallback string) string {
+	if b, err := os.ReadFile(runningFile(statePath)); err == nil && isListen(strings.TrimSpace(string(b))) {
+		return strings.TrimSpace(string(b))
+	}
+	return fallback
 }

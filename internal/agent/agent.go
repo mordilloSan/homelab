@@ -112,7 +112,7 @@ func isURL(s string) bool {
 // isRel is a folder inside another one: relative and never above it.
 func isRel(s string) bool {
 	c := filepath.Clean(s)
-	return s != "" && !filepath.IsAbs(s) && c != ".." && !strings.HasPrefix(c, "../")
+	return s != "" && !filepath.IsAbs(s) && c != "." && c != ".." && !strings.HasPrefix(c, "../")
 }
 
 func isListen(s string) bool {
@@ -232,6 +232,7 @@ func saveConfig(path string, c *Config) error {
 
 func writeAtomic(path string, b []byte) error {
 	tmp := path + ".tmp"
+	_ = os.Remove(tmp) // WriteFile keeps the mode of a leftover one
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
@@ -326,6 +327,7 @@ type Agent struct {
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool
 	scanning   atomic.Bool
+	rescan     atomic.Bool // asked for while a scan ran
 	pushErr    string
 	beats      map[string][]Beat
 	tnasSeen   bool // last TNAS ping, so a change is logged once
@@ -561,6 +563,9 @@ func (a *Agent) record(p probe) {
 	}
 	add("npm", status[p.npmOK], p.npmMs)
 	for _, sv := range a.cfg.Services {
+		if _, checked := p.svcOK[sv.Name]; !checked {
+			continue // added after this check started: the next one sees it
+		}
 		switch {
 		case p.npmOK:
 			add(sv.Name, status[p.svcOK[sv.Name]], p.svcMs[sv.Name])
@@ -612,6 +617,9 @@ func (a *Agent) evaluate(p probe) {
 
 	known := a.serverNPM(p)
 	for _, sv := range c.Services {
+		if _, checked := p.svcOK[sv.Name]; !checked {
+			continue // added after this check started: not failed, just not checked yet
+		}
 		a.step(sv, a.svc(sv.Name), known, p.svcOK[sv.Name])
 	}
 	if st.TNASNPM.Snapshot != "" {
@@ -1045,9 +1053,19 @@ type Stack struct {
 // outside the lock: a few dozen docker calls.
 func (a *Agent) scanImages() {
 	if !a.scanning.CompareAndSwap(false, true) {
+		a.rescan.Store(true) // the one running has the old config: go again when it ends
 		return
 	}
 	defer a.scanning.Store(false)
+	for {
+		a.scanOnce()
+		if !a.rescan.Swap(false) {
+			return
+		}
+	}
+}
+
+func (a *Agent) scanOnce() {
 	a.mu.Lock()
 	c := a.cfg
 	a.publish() // shows the scan in progress
