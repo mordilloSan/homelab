@@ -25,15 +25,16 @@ type mirrorDir struct {
 }
 
 // getMirror lists the folders of the mirror with a docker-compose.yml, the
-// ones a service can be made of.
+// ones a service can be made of; the NPM's is not one.
 func (a *Agent) getMirror(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	root := filepath.Join(a.cfg.Paths.MirrorSubvol, a.cfg.Paths.MirrorRoot)
+	npm := a.cfg.NPM.Dir
 	a.mu.Unlock()
 	out := []mirrorDir{}
 	ents, _ := os.ReadDir(root) // sorted by name; unreadable is an empty list
 	for _, e := range ents {
-		if e.IsDir() && fileExists(filepath.Join(root, e.Name(), "docker-compose.yml")) {
+		if e.IsDir() && e.Name() != npm && fileExists(filepath.Join(root, e.Name(), "docker-compose.yml")) {
 			out = append(out, mirrorDir{e.Name()})
 		}
 	}

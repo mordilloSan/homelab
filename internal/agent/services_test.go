@@ -17,7 +17,7 @@ func svcSetup(t *testing.T) (*Agent, *fake) {
 	t.Helper()
 	a, f := setup(t)
 	dir := t.TempDir()
-	for _, d := range []string{"nextcloud", "paperless"} {
+	for _, d := range []string{"nextcloud", "npm", "paperless"} {
 		if err := os.MkdirAll(filepath.Join(dir, "mirror", "homelab", d), 0o755); err != nil {
 			t.Fatal(err)
 		}
