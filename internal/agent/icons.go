@@ -27,6 +27,15 @@ const (
 
 func (a *Agent) iconDir() string { return filepath.Join(filepath.Dir(a.statePath), "icons") }
 
+// iconPath is where name's icon is kept; false for a name that is not a
+// service's, which could reach outside the folder. Every use goes through it.
+func (a *Agent) iconPath(name string) (string, bool) {
+	if !validName.MatchString(name) || strings.Contains(name, "..") {
+		return "", false
+	}
+	return filepath.Join(a.iconDir(), name), true
+}
+
 // iconSources is where a service's icon comes from, in order: its link, or
 // dashboard-icons by name and then by folder, SVG first (not every icon has
 // one) and then PNG.
@@ -83,6 +92,10 @@ func rev(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:
 // storeIcon keeps b as the icon of name, with where it came from; nil
 // records a miss. A failure to write only goes to the log.
 func (a *Agent) storeIcon(name string, srcs []string, b []byte) {
+	file, ok := a.iconPath(name)
+	if !ok {
+		return
+	}
 	a.iconMu.Lock()
 	defer a.iconMu.Unlock()
 	dir, src := a.iconDir(), strings.Join(srcs, " ")
@@ -90,15 +103,15 @@ func (a *Agent) storeIcon(name string, srcs []string, b []byte) {
 	chownLikeDir(dir) // the state folder's owner, not root
 	if b == nil {
 		src = iconMissed + src
-		_ = os.Remove(filepath.Join(dir, name))
+		_ = os.Remove(file)
 		delete(a.iconRev, name)
 	} else if err == nil {
-		if err = writeAtomic(filepath.Join(dir, name), b); err == nil {
+		if err = writeAtomic(file, b); err == nil {
 			a.iconRev[name] = rev(b)
 		}
 	}
 	if err == nil {
-		err = writeAtomic(filepath.Join(dir, name+".src"), []byte(src))
+		err = writeAtomic(file+".src", []byte(src))
 	}
 	if err != nil {
 		slog.Error("guardar o ícone", "svc", name, "error", err)
@@ -106,10 +119,14 @@ func (a *Agent) storeIcon(name string, srcs []string, b []byte) {
 }
 
 func (a *Agent) dropIcon(name string) {
+	file, ok := a.iconPath(name)
+	if !ok {
+		return
+	}
 	a.iconMu.Lock()
 	defer a.iconMu.Unlock()
-	_ = os.Remove(filepath.Join(a.iconDir(), name))
-	_ = os.Remove(filepath.Join(a.iconDir(), name+".src"))
+	_ = os.Remove(file)
+	_ = os.Remove(file + ".src")
 	delete(a.iconRev, name)
 }
 
@@ -137,12 +154,16 @@ func (a *Agent) fetchIconsFrom(svcs []Service) {
 	}
 	for _, sv := range svcs {
 		srcs := iconSources(sv)
-		src := filepath.Join(a.iconDir(), sv.Name+".src")
+		file, ok := a.iconPath(sv.Name)
+		if !ok {
+			continue
+		}
+		src := file + ".src"
 		had, _ := os.ReadFile(src)
 		fi, _ := os.Stat(src)
 		switch {
 		case string(had) == strings.Join(srcs, " "):
-			if b, err := os.ReadFile(filepath.Join(a.iconDir(), sv.Name)); err == nil {
+			if b, err := os.ReadFile(file); err == nil {
 				a.iconMu.Lock()
 				a.iconRev[sv.Name] = rev(b)
 				a.iconMu.Unlock()
@@ -171,12 +192,12 @@ func (a *Agent) iconV(name string) string {
 // anything even when opened on its own; the address carries the version, so
 // it is cached for good.
 func (a *Agent) getIcon(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if !validName.MatchString(name) {
+	file, ok := a.iconPath(r.PathValue("name"))
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	b, err := os.ReadFile(filepath.Join(a.iconDir(), name))
+	b, err := os.ReadFile(file)
 	if err != nil || iconType(b) == "" {
 		http.NotFound(w, r)
 		return

@@ -115,3 +115,17 @@ func TestIconPassAfterRemove(t *testing.T) {
 		t.Fatal("o ícone de um serviço removido voltou")
 	}
 }
+
+// Icon files are only ever under state/icons, whatever name reaches them.
+func TestIconPathsStayInside(t *testing.T) {
+	a, _ := setup(t)
+	victim := filepath.Join(filepath.Dir(a.statePath), "victim")
+	if err := os.WriteFile(victim, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.dropIcon("../victim")
+	a.storeIcon("../victim", nil, nil)
+	if !fileExists(victim) {
+		t.Fatal("apagou um ficheiro fora da pasta dos ícones")
+	}
+}
