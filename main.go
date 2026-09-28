@@ -92,7 +92,8 @@ func healthcheck(cfgPath, statePath string) error {
 	if err != nil {
 		return err
 	}
-	return agent.Healthcheck(cfg.UI.Listen, agent.CertFile(statePath))
+	// the address in use, which a saved but not yet restarted ui.listen may differ from
+	return agent.Healthcheck(agent.RunningListen(statePath, cfg.UI.Listen), agent.CertFile(statePath))
 }
 
 // serve runs the agent until ctx ends. A signal stops it between ticks, never
@@ -128,6 +129,9 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a.SetListening(cfg.UI.Listen)
+	if lerr := agent.SetRunningListen(statePath, cfg.UI.Listen); lerr != nil {
+		slog.Warn("guardar o endereço da interface para o healthcheck", "error", lerr)
+	}
 	a.SetRestart(cancel) // the UI's restart: Run returns, the process exits 0 and Docker starts it again
 	serveErr := make(chan error, 1)
 	go func() {

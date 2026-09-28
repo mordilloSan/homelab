@@ -36,6 +36,7 @@ type Service struct {
 	StabilityMin  int    `yaml:"stability_min" json:"stability_min"`
 	Override      string `yaml:"override,omitempty" json:"override,omitempty"`
 	RequireFreeIP string `yaml:"require_free_ip,omitempty" json:"require_free_ip,omitempty"`
+	Icon          string `yaml:"icon,omitempty" json:"icon,omitempty"` // a link to an image; empty: dashboard-icons by name or folder
 }
 
 type Config struct {
@@ -111,7 +112,7 @@ func isURL(s string) bool {
 // isRel is a folder inside another one: relative and never above it.
 func isRel(s string) bool {
 	c := filepath.Clean(s)
-	return s != "" && !filepath.IsAbs(s) && c != ".." && !strings.HasPrefix(c, "../")
+	return s != "" && !filepath.IsAbs(s) && c != "." && c != ".." && !strings.HasPrefix(c, "../")
 }
 
 func isListen(s string) bool {
@@ -136,7 +137,7 @@ func (c *Config) validate() error {
 		{!isIP(c.RouterIP), "router_ip", "tem de ser um endereço IP"},
 		{strings.ContainsAny(c.LANIface, " /\t"), "lan_iface", "tem de ser o nome de uma interface, sem espaços"},
 		{!filepath.IsAbs(c.Paths.MirrorSubvol), "paths.mirror_subvol", "tem de ser um caminho absoluto"},
-		{c.Paths.MirrorRoot != "" && !isRel(c.Paths.MirrorRoot), "paths.mirror_root", "tem de ser uma pasta dentro do espelho"},
+		{c.Paths.MirrorRoot != "" && c.Paths.MirrorRoot != "." && !isRel(c.Paths.MirrorRoot), "paths.mirror_root", "tem de ser uma pasta dentro do espelho"},
 		{!filepath.IsAbs(c.Paths.SnapshotsDir), "paths.snapshots_dir", "tem de ser um caminho absoluto"},
 		{c.Paths.OverridesDir != "" && !filepath.IsAbs(c.Paths.OverridesDir), "paths.overrides_dir", "tem de ser um caminho absoluto"},
 		{!isRel(c.NPM.Dir), "npm.dir", "tem de ser uma pasta dentro do espelho"},
@@ -156,24 +157,45 @@ func (c *Config) validate() error {
 			return fe("nightly.prepull_at", "tem de ser HH:MM")
 		}
 	}
-	seen := map[string]bool{"npm": true}
+	// One address per service (a return deletes the record a failover of
+	// another would need) and one folder (else the same containers twice).
+	seen, hosts, dirs := map[string]bool{"npm": true}, map[string]bool{}, map[string]bool{filepath.Clean(c.NPM.Dir): true}
 	for _, s := range c.Services {
-		if err := c.validateService(s, seen); err != nil {
-			return err
+		err := c.validateService(s, seen)
+		switch {
+		case err != nil:
+		case hosts[strings.ToLower(s.Host)]:
+			err = fe("host", "já é o endereço de outro serviço")
+		case dirs[filepath.Clean(s.Dir)]:
+			err = fe("dir", "já é a pasta de outro serviço, ou a do NPM")
 		}
-		seen[s.Name] = true
+		if err != nil {
+			return fmt.Errorf("serviço %s: %w", s.Name, err)
+		}
+		seen[s.Name], hosts[strings.ToLower(s.Host)], dirs[filepath.Clean(s.Dir)] = true, true, true
 	}
 	return nil
 }
 
 func (c *Config) validateService(s Service, seen map[string]bool) error {
-	switch {
-	case !validName.MatchString(s.Name) || seen[s.Name] || s.Dir == "" || s.Host == "":
-		return fmt.Errorf("serviço inválido ou repetido: %q", s.Name)
-	case s.WaitMin < 1 || s.StabilityMin < 0:
-		return fmt.Errorf("%s: wait_min tem de ser >= 1 e stability_min >= 0", s.Name)
-	case s.RequireFreeIP != "" && c.LANIface == "":
-		return fmt.Errorf("%s: require_free_ip precisa de lan_iface", s.Name)
+	for _, r := range []struct {
+		bad        bool
+		field, msg string
+	}{
+		{s.Name == "npm", "name", "npm está reservado para o NPM do TNAS"},
+		{!validName.MatchString(s.Name), "name", "só minúsculas, números, - e _, a começar por letra ou número"},
+		{seen[s.Name], "name", "já existe um serviço com este nome"},
+		{!isRel(s.Dir), "dir", "tem de ser uma pasta dentro do espelho"},
+		{!isName(s.Host), "host", "tem de ser um nome, sem https:// nem /"},
+		{s.WaitMin < 1, "wait_min", "tem de ser pelo menos 1"},
+		{s.StabilityMin < 0, "stability_min", "não pode ser negativa"},
+		{s.RequireFreeIP != "" && !isIP(s.RequireFreeIP), "require_free_ip", "tem de ser um endereço IP"},
+		{s.RequireFreeIP != "" && c.LANIface == "", "require_free_ip", "precisa da interface da LAN (Definições → Rede)"},
+		{s.Icon != "" && !isURL(s.Icon), "icon", "tem de ser um link http:// ou https:// para uma imagem"},
+	} {
+		if r.bad {
+			return fe(r.field, r.msg)
+		}
 	}
 	return nil
 }
@@ -210,6 +232,7 @@ func saveConfig(path string, c *Config) error {
 
 func writeAtomic(path string, b []byte) error {
 	tmp := path + ".tmp"
+	_ = os.Remove(tmp) // WriteFile keeps the mode of a leftover one
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
@@ -259,13 +282,14 @@ type State struct {
 		OK       bool      `json:"ok"`
 		Msg      string    `json:"msg,omitempty"`
 	} `json:"tnas_npm"`
-	MaintUntil time.Time            `json:"maint_until,omitzero"`
-	LastPull   string               `json:"last_pull,omitempty"`
-	Images     map[string]Stack     `json:"images,omitempty"` // by service; "npm" is the TNAS NPM
-	ImagesAt   time.Time            `json:"images_at,omitzero"`
-	ImagesMsg  string               `json:"images_msg,omitempty"`
-	Services   map[string]*SvcState `json:"services"`
-	Events     []Event              `json:"events,omitempty"` // only read: moved to events.jsonl on start
+	MaintUntil   time.Time            `json:"maint_until,omitzero"`
+	LastPull     string               `json:"last_pull,omitempty"`
+	Images       map[string]Stack     `json:"images,omitempty"` // by service; "npm" is the TNAS NPM
+	ImagesAt     time.Time            `json:"images_at,omitzero"`
+	ImagesMsg    string               `json:"images_msg,omitempty"`
+	Services     map[string]*SvcState `json:"services"`
+	Events       []Event              `json:"events,omitempty"`        // only read: moved to events.jsonl on start
+	SetupPending bool                 `json:"setup_pending,omitempty"` // a new install whose first-start guide is not finished; an older state lacks it: done
 }
 
 // System is every side effect the agent has, so tests can replace it.
@@ -290,17 +314,22 @@ type Agent struct {
 	cfgPath    string
 	statePath  string
 	eventsPath string
-	evMu       sync.Mutex                // guards events, apart from mu so the page can read them mid-tick
-	events     []Event                   // oldest first
-	trimmedOn  string                    // the day trimEvents last ran, as 2006-01-02
-	tnasIP     atomic.Pointer[string]    // for the certificate, read on handshakes without mu
-	restart    func()                    // ends Run so Docker starts the agent again (SetRestart)
-	listening  string                    // the UI's address in use, which a saved ui.listen may differ from
-	certs      atomic.Pointer[certStore] // set when the UI serves TLS
+	evMu       sync.Mutex             // guards events, apart from mu so the page can read them mid-tick
+	events     []Event                // oldest first
+	trimmedOn  string                 // the day trimEvents last ran, as 2006-01-02
+	tnasIP     atomic.Pointer[string] // for the certificate, read on handshakes without mu
+	restart    func()                 // ends Run so Docker starts the agent again (SetRestart)
+	listening  string                 // the UI's address in use, which a saved ui.listen may differ from
+	certs      atomic.Pointer[certStore]
+	iconMu     sync.Mutex        // guards iconRev and the icon files; never held while taking mu
+	iconRev    map[string]string // service → version of its stored icon, for the page's cache
+	iconJobs   sync.WaitGroup    // fetchIcons in the background (tests wait for it)
+	iconPass   sync.Mutex        // one fetchIcons pass at a time // set when the UI serves TLS
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool
 	scanning   atomic.Bool
+	rescan     atomic.Bool // asked for while a scan ran
 	pushErr    string
 	beats      map[string][]Beat
 	tnasSeen   bool // last TNAS ping, so a change is logged once
@@ -321,6 +350,8 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 		}
 	case !errors.Is(err, fs.ErrNotExist):
 		return nil, err
+	default:
+		a.st.SetupPending = true // no state yet: a new install, which gets the guide
 	}
 	if a.st.Services == nil {
 		a.st.Services = map[string]*SvcState{}
@@ -336,6 +367,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	a.events, a.st.Events = evs, nil
 	a.trimEvents()
 	a.tnasIP.Store(&cfg.TNASIP)
+	a.iconRev = map[string]string{}
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
 	if err != nil {
@@ -349,6 +381,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 // Run ticks until ctx ends. A tick in progress always finishes: stopping in
 // the middle of a failover would leave a snapshot the state does not know.
 func (a *Agent) Run(ctx context.Context) {
+	a.iconJobs.Go(a.fetchIcons)
 	for {
 		a.mu.Lock()
 		stale := time.Since(a.st.ImagesAt) > time.Hour
@@ -534,6 +567,9 @@ func (a *Agent) record(p probe) {
 	}
 	add("npm", status[p.npmOK], p.npmMs)
 	for _, sv := range a.cfg.Services {
+		if _, checked := p.svcOK[sv.Name]; !checked {
+			continue // added after this check started: the next one sees it
+		}
 		switch {
 		case p.npmOK:
 			add(sv.Name, status[p.svcOK[sv.Name]], p.svcMs[sv.Name])
@@ -585,6 +621,9 @@ func (a *Agent) evaluate(p probe) {
 
 	known := a.serverNPM(p)
 	for _, sv := range c.Services {
+		if _, checked := p.svcOK[sv.Name]; !checked {
+			continue // added after this check started: not failed, just not checked yet
+		}
 		a.step(sv, a.svc(sv.Name), known, p.svcOK[sv.Name])
 	}
 	if st.TNASNPM.Snapshot != "" {
@@ -1018,9 +1057,24 @@ type Stack struct {
 // outside the lock: a few dozen docker calls.
 func (a *Agent) scanImages() {
 	if !a.scanning.CompareAndSwap(false, true) {
+		a.rescan.Store(true) // the one running has the old config: go again when it ends
 		return
 	}
-	defer a.scanning.Store(false)
+	defer func() {
+		a.scanning.Store(false)
+		if a.rescan.Swap(false) { // asked for just as this one ended
+			go a.scanImages()
+		}
+	}()
+	for {
+		a.scanOnce()
+		if !a.rescan.Swap(false) {
+			return
+		}
+	}
+}
+
+func (a *Agent) scanOnce() {
 	a.mu.Lock()
 	c := a.cfg
 	a.publish() // shows the scan in progress
@@ -1151,10 +1205,12 @@ func (a *Agent) publish() {
 	type svcView struct {
 		Service
 		*SvcState
+		KumaToken bool   `json:"kuma_token"` // set or not; the token never leaves the agent
+		IconV     string `json:"icon_v,omitempty"`
 	}
 	svcs := make([]svcView, 0, len(a.cfg.Services))
 	for _, sv := range a.cfg.Services {
-		svcs = append(svcs, svcView{sv, a.svc(sv.Name)})
+		svcs = append(svcs, svcView{sv, a.svc(sv.Name), a.cfg.Kuma.ServiceTokens[sv.Name] != "", a.iconV(sv.Name)})
 	}
 	names, notAfter := a.CertInfo()
 	a.evMu.Lock()
@@ -1197,6 +1253,7 @@ func (a *Agent) publish() {
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
 		Settings         any       `json:"settings"`
+		SetupPending     bool      `json:"setup_pending"`
 		UIListenRunning  string    `json:"ui_listen_running"`
 		Cert             any       `json:"cert"`
 	}{
@@ -1204,7 +1261,7 @@ func (a *Agent) publish() {
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
-		settingsView(&a.cfg), a.listening, certView{names, notAfter},
+		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},
 	})
 	a.view.Store(&b)
 }

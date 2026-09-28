@@ -147,6 +147,27 @@ fieldset:disabled .set-input input { opacity: .6; cursor: not-allowed; }
 .sec-err { margin-top: 12px; }
 .sec-sub { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
 .set-sec .banner { margin-top: 12px; }
+.wiz-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.wiz-n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; margin-right: 8px; font-size: 11.5px;
+  background: color-mix(in srgb, var(--text), transparent 88%); font-variant-numeric: tabular-nums; }
+.toc a[aria-current] .wiz-n { background: var(--primary); color: #fff; }
+.wiz-intro { margin: -4px 0 16px !important; }
+.wiz-done { display: flex; gap: 8px; align-items: center; }
+.wiz-svcs { margin: 0 0 4px; }
+.wiz-svcs .svc-icon { width: 30px; height: 30px; border-radius: 8px; }
+.wiz-svcs .svc-icon .icon { width: 18px; height: 18px; }
+#svcForm fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; min-width: 0; }
+#svcForm .set-field { grid-template-columns: minmax(0, 1fr); }
+#svcForm .set-help, #svcForm .field-err { grid-column: 1; }
+#svcForm .set-input input, #svcForm select { width: min(100%, 420px); }
+#svcForm textarea { width: 100%; min-height: 120px; padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--divider);
+  background: var(--well); font: 12.5px/1.5 var(--mono); resize: vertical; }
+#svcForm fieldset:disabled textarea, #svcForm fieldset:disabled select { opacity: .6; cursor: not-allowed; }
+.svc-img { object-fit: contain; }
+.icon-url { display: flex; align-items: center; gap: 10px; width: 100%; }
+.icon-url .svc-icon { width: 34px; height: 34px; border-radius: 8px; flex: none; }
+.icon-url input { flex: 1; }
+.set-help a { color: var(--primary); }
 select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well);
   font-variant-numeric: tabular-nums; }
 .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; margin-left: 4px; font-variant-numeric: tabular-nums; }
@@ -261,10 +282,9 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
   background: var(--well); }
 .section-head #svcSearch[hidden] + .btn { margin-left: auto; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
-.svc { --accent: var(--success); display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px;
-  border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 16px; }
+.svc { --accent: var(--success); display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; cursor: pointer;
+  border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 16px; transition: border-color .5s, background-color .15s; }
 .svc.alert { border-bottom-color: var(--accent); }
-.svc { cursor: pointer; gap: 10px; padding: 14px; border-radius: 12px; transition: border-color .5s, background-color .15s; }
 .svc:hover { background-color: color-mix(in srgb, var(--text), transparent 96%); }
 .svc-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .svc-top h3 { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -283,9 +303,6 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .status.tone-error p { color: var(--error); }
 .bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text), transparent 90%); overflow: hidden; }
 .bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .6s ease; }
-.snap { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-md); background: var(--well); min-width: 0; }
-.snap .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.snap .icon { width: 16px; height: 16px; color: var(--muted); }
 
 /* rules + events */
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 0; padding: 0; margin: 0 0 16px; }
@@ -300,7 +317,6 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .field { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .unit { color: var(--muted); margin-left: 6px; }
 .form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 16px; }
-.form-foot .note { margin-right: auto; color: var(--warning); font-size: 12.5px; }
 
 .timeline { list-style: none; margin: 0; padding: 0; }
 .ev { --c: var(--neutral); display: grid; grid-template-columns: 14px 96px 120px minmax(0, 1fr); gap: 12px; padding: 9px 4px; align-items: start; }
@@ -309,6 +325,7 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .ev.err p { color: var(--error); }
 .sheet .ev { grid-template-columns: 14px 96px minmax(0, 1fr); }
 .ev-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ev-filters .btn { margin-left: auto; }
 .ev-filters input { flex: 1; min-width: 180px; max-width: 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well); }
 #evMore { display: flex; justify-content: center; padding-top: 12px; }
 #evMore:empty { display: none; }
@@ -330,7 +347,7 @@ dialog p { color: var(--muted); }
 .pw-field { display: grid; gap: 4px; margin-top: 12px; color: var(--muted); font-size: 12.5px; }
 .pw-field input { padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--divider); background: var(--well); font-size: 13px; }
 .pw-field input:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; }
-#pwErr:empty, #tokenErr:empty { display: none; }
+#pwErr:empty, .token-err:empty { display: none; }
 .sec-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .sec .toggle { margin-bottom: 8px; }
 .sec .kv { margin-top: 12px; }
@@ -437,6 +454,8 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
   <section class="page" id="page-overview">
   <div class="banner" id="banner" role="alert" hidden><span data-icon="alert"></span><div id="bannerText"></div></div>
+  <div class="banner" id="setupBanner" style="--c:var(--info)" hidden><span data-icon="wrench"></span>
+    <div>A configuração inicial ainda não está concluída. <a href="#/assistente">Continuar o assistente</a></div></div>
   <div class="banner" id="pwBanner" role="alert" style="--c:var(--warning)" hidden><span data-icon="key"></span>
     <div>A interface ainda usa o utilizador e a password por defeito (admin / admin). <button class="btn" id="pwBannerBtn">Mudar password</button></div></div>
 
@@ -458,7 +477,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
   <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span>
     <input type="search" id="svcSearch" placeholder="Procurar serviço…" aria-label="Procurar serviço" hidden>
-    <button class="btn contained" disabled title="Em breve">+ Adicionar serviço</button></div>
+    <button class="btn contained" data-panel="svcEdit" aria-haspopup="dialog">+ Adicionar serviço</button></div>
   <div class="grid" id="svcs"></div>
 
   </section>
@@ -469,6 +488,19 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
       <div class="ev-filters" id="evFilters"></div>
       <ol class="timeline" id="events"></ol>
       <div id="evMore"></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-setup" hidden>
+    <div class="card-head" style="margin:0 4px -8px"><h2>Configuração inicial</h2><span class="spacer"></span><span class="muted" id="wizPos"></span></div>
+    <div class="settings">
+      <nav class="toc" id="wizSteps" aria-label="Passos"></nav>
+      <div>
+        <div class="card set-sec" id="wiz-body"></div>
+        <div class="wiz-foot"><button type="button" class="btn" id="wizPrev">Anterior</button>
+          <a class="muted" href="#/">Continuar mais tarde</a>
+          <button type="button" class="btn contained" id="wizNext">Seguinte</button></div>
+      </div>
     </div>
   </section>
 
@@ -527,8 +559,14 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
 <script>
 // mdi icons, the set LinuxIO uses (@iconify-json/mdi)
-const ICONS = {"server":"M4 1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1M9 5h1V3H9zm0 8h1v-2H9zm0 8h1v-2H9zM5 3v2h2V3zm0 8v2h2v-2zm0 8v2h2v-2z","nas":"M4 5c-1.11 0-2 .89-2 2v10c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V7c0-1.11-.89-2-2-2zm.5 2a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h13v10H7zm1 1v8h3V8zm4 0v8h3V8zm4 0v8h3V8zM9 9h1v1H9zm4 0h1v1h-1zm4 0h1v1h-1z","router":"M5 9c-1.1 0-2 .9-2 2v4a2 2 0 0 0 2 2h6v2h-1c-.55 0-1 .45-1 1H2v2h7c0 .55.45 1 1 1h4c.55 0 1-.45 1-1h7v-2h-7c0-.55-.45-1-1-1h-1v-2h6c1.11 0 2-.89 2-2v-4a2 2 0 0 0-2-2zm1 3h2v2H6zm3.5 0h2v2h-2zm3.5 0h2v2h-2z","shield":"M21 11c0 5.55-3.84 10.74-9 12c-5.16-1.26-9-6.45-9-12V5l9-4l9 4zm-9 10c3.75-1 7-5.46 7-9.78V6.3l-7-3.12L5 6.3v4.92C5 15.54 8.25 20 12 21m2.8-10V9.5C14.8 8.1 13.4 7 12 7S9.2 8.1 9.2 9.5V11c-.6 0-1.2.6-1.2 1.2v3.5c0 .7.6 1.3 1.2 1.3h5.5c.7 0 1.3-.6 1.3-1.2v-3.5c0-.7-.6-1.3-1.2-1.3m-1.3 0h-3V9.5c0-.8.7-1.3 1.5-1.3s1.5.5 1.5 1.3z","images":"M21 17H7V3h14m0-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2M3 5H1v16a2 2 0 0 0 2 2h16v-2H3m12.96-10.71l-2.75 3.54l-1.96-2.36L8.5 15h11z","speed":"M12 16a3 3 0 0 1-3-3c0-1.12.61-2.1 1.5-2.61l9.71-5.62l-5.53 9.58c-.5.98-1.51 1.65-2.68 1.65m0-13c1.81 0 3.5.5 4.97 1.32l-2.1 1.21C14 5.19 13 5 12 5a8 8 0 0 0-8 8c0 2.21.89 4.21 2.34 5.65h.01c.39.39.39 1.02 0 1.41s-1.03.39-1.42.01A9.97 9.97 0 0 1 2 13A10 10 0 0 1 12 3m10 10c0 2.76-1.12 5.26-2.93 7.07c-.39.38-1.02.38-1.41-.01a.996.996 0 0 1 0-1.41A7.95 7.95 0 0 0 20 13c0-1-.19-2-.54-2.9L20.67 8C21.5 9.5 22 11.18 22 13","dashboard":"M19 5v2h-4V5zM9 5v6H5V5zm10 8v6h-4v-6zM9 17v2H5v-2zM21 3h-8v6h8zM11 3H3v10h8zm10 8h-8v10h8zm-10 4H3v6h8z","ap":"M4.93 4.93A9.97 9.97 0 0 0 2 12c0 2.76 1.12 5.26 2.93 7.07l1.41-1.41A7.94 7.94 0 0 1 4 12c0-2.21.89-4.22 2.34-5.66zm14.14 0l-1.41 1.41A7.96 7.96 0 0 1 20 12c0 2.22-.89 4.22-2.34 5.66l1.41 1.41A9.97 9.97 0 0 0 22 12c0-2.76-1.12-5.26-2.93-7.07M7.76 7.76A5.98 5.98 0 0 0 6 12c0 1.65.67 3.15 1.76 4.24l1.41-1.41A4 4 0 0 1 8 12c0-1.11.45-2.11 1.17-2.83zm8.48 0l-1.41 1.41A4 4 0 0 1 16 12c0 1.11-.45 2.11-1.17 2.83l1.41 1.41A5.98 5.98 0 0 0 18 12c0-1.65-.67-3.15-1.76-4.24M12 10a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cube":"M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.99.99 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88zM12 4.15L6.04 7.5L12 10.85l5.96-3.35zM5 15.91l6 3.38v-6.71L5 9.21zm14 0v-6.7l-6 3.37v6.71z","swap":"m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z","wrench":"m22.61 19l-9.08-9.09c.93-2.34.47-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.5L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.39-.4.39-1.01 0-1.4m-3 1.59l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24L7.24 3c1.26-.05 2.49.39 3.44 1.33a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.46 9.45z","alert":"M11 15h2v2h-2zm0-8h2v6h-2zm1-5C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 18a8 8 0 0 1-8-8a8 8 0 0 1 8-8a8 8 0 0 1 8 8a8 8 0 0 1-8 8","check":"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z","restore":"M12 3a9 9 0 0 0-9 9H0l4 4l4-4H5a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7c-1.5 0-2.91-.5-4.06-1.3L6.5 19.14A9.1 9.1 0 0 0 12 21a9 9 0 0 0 9-9a9 9 0 0 0-9-9m2 9a2 2 0 0 0-2-2a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2","layers":"m12 18.54l7.37-5.74L21 14.07l-9 7l-9-7l1.62-1.26zM12 16L3 9l9-7l9 7zm0-11.47L6.26 9L12 13.47L17.74 9z","close":"M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z","docker":"M21.81 10.25c-.06-.04-.56-.43-1.64-.43c-.28 0-.56.03-.84.08c-.21-1.4-1.38-2.11-1.43-2.14l-.29-.17l-.18.27c-.24.36-.43.77-.51 1.19c-.2.8-.08 1.56.33 2.21c-.49.28-1.29.35-1.46.35H2.62c-.34 0-.62.28-.62.63c0 1.15.18 2.3.58 3.38c.45 1.19 1.13 2.07 2 2.61c.98.6 2.59.94 4.42.94c.79 0 1.61-.07 2.42-.22c1.12-.2 2.2-.59 3.19-1.16A8.3 8.3 0 0 0 16.78 16c1.05-1.17 1.67-2.5 2.12-3.65h.19c1.14 0 1.85-.46 2.24-.85c.26-.24.45-.53.59-.87l.08-.24zm-17.96.99h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H3.85c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.43 0h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H6.28c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.47 0h1.75c.1 0 .17-.07.17-.16V9.5c0-.08-.06-.16-.17-.16H8.75c-.08 0-.15.07-.15.16v1.58c0 .09.06.16.15.16m2.44 0h1.77c.08 0 .15-.07.15-.16V9.5c0-.08-.06-.16-.15-.16h-1.77c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16M6.28 9h1.76c.08 0 .16-.09.16-.18V7.25c0-.09-.07-.16-.16-.16H6.28c-.09 0-.16.06-.16.16v1.57c.01.09.07.18.16.18m2.47 0h1.75c.1 0 .17-.09.17-.18V7.25c0-.09-.06-.16-.17-.16H8.75c-.08 0-.15.06-.15.16v1.57c0 .09.06.18.15.18m2.44 0h1.77c.08 0 .15-.09.15-.18V7.25c0-.09-.07-.16-.15-.16h-1.77c-.08 0-.15.06-.15.16v1.57c0 .09.07.18.15.18m0-2.28h1.77c.08 0 .15-.07.15-.16V5c0-.1-.07-.17-.15-.17h-1.77c-.08 0-.15.06-.15.17v1.56c0 .08.07.16.15.16m2.46 4.52h1.76c.09 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16h-1.76c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16","clock":"M12 20a8 8 0 0 0 8-8a8 8 0 0 0-8-8a8 8 0 0 0-8 8a8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10a10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67l-.75 1.23L11 13V7z","refresh":"M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8a8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6a6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z","dns":"M7 9a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1M7 19a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1","devices":"M3 6h18V4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3zm10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.34 1-2.22s-.39-1.67-1-2.22zm-2 5.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5s1.5.67 1.5 1.5s-.67 1.5-1.5 1.5M22 8h-6c-.5 0-1 .5-1 1v10c0 .5.5 1 1 1h6c.5 0 1-.5 1-1V9c0-.5-.5-1-1-1m-1 10h-4v-8h4z","key":"M22 18v4h-4v-3h-3v-3h-3l-2.26-2.26c-.55.17-1.13.26-1.74.26a6 6 0 0 1-6-6a6 6 0 0 1 6-6a6 6 0 0 1 6 6c0 .61-.09 1.19-.26 1.74zM7 5a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cog":"M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64z","web":"M16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2m-5.15 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56M14.34 14H9.66c-.1-.66-.16-1.32-.16-2s.06-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2M12 19.96c-.83-1.2-1.5-2.53-1.91-3.96h3.82c-.41 1.43-1.08 2.76-1.91 3.96M8 8H5.08A7.92 7.92 0 0 1 9.4 4.44C8.8 5.55 8.35 6.75 8 8m-2.92 8H8c.35 1.25.8 2.45 1.4 3.56A8 8 0 0 1 5.08 16m-.82-2C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2M12 4.03c.83 1.2 1.5 2.54 1.91 3.97h-3.82c.41-1.43 1.08-2.77 1.91-3.97M18.92 8h-2.95a15.7 15.7 0 0 0-1.38-3.56c1.84.63 3.37 1.9 4.33 3.56M12 2C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2","logout":"m17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5M4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4z"};
+const ICONS = {"server":"M4 1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1m0 8h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1M9 5h1V3H9zm0 8h1v-2H9zm0 8h1v-2H9zM5 3v2h2V3zm0 8v2h2v-2zm0 8v2h2v-2z","nas":"M4 5c-1.11 0-2 .89-2 2v10c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V7c0-1.11-.89-2-2-2zm.5 2a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h13v10H7zm1 1v8h3V8zm4 0v8h3V8zm4 0v8h3V8zM9 9h1v1H9zm4 0h1v1h-1zm4 0h1v1h-1z","router":"M5 9c-1.1 0-2 .9-2 2v4a2 2 0 0 0 2 2h6v2h-1c-.55 0-1 .45-1 1H2v2h7c0 .55.45 1 1 1h4c.55 0 1-.45 1-1h7v-2h-7c0-.55-.45-1-1-1h-1v-2h6c1.11 0 2-.89 2-2v-4a2 2 0 0 0-2-2zm1 3h2v2H6zm3.5 0h2v2h-2zm3.5 0h2v2h-2z","shield":"M21 11c0 5.55-3.84 10.74-9 12c-5.16-1.26-9-6.45-9-12V5l9-4l9 4zm-9 10c3.75-1 7-5.46 7-9.78V6.3l-7-3.12L5 6.3v4.92C5 15.54 8.25 20 12 21m2.8-10V9.5C14.8 8.1 13.4 7 12 7S9.2 8.1 9.2 9.5V11c-.6 0-1.2.6-1.2 1.2v3.5c0 .7.6 1.3 1.2 1.3h5.5c.7 0 1.3-.6 1.3-1.2v-3.5c0-.7-.6-1.3-1.2-1.3m-1.3 0h-3V9.5c0-.8.7-1.3 1.5-1.3s1.5.5 1.5 1.3z","images":"M21 17H7V3h14m0-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2M3 5H1v16a2 2 0 0 0 2 2h16v-2H3m12.96-10.71l-2.75 3.54l-1.96-2.36L8.5 15h11z","speed":"M12 16a3 3 0 0 1-3-3c0-1.12.61-2.1 1.5-2.61l9.71-5.62l-5.53 9.58c-.5.98-1.51 1.65-2.68 1.65m0-13c1.81 0 3.5.5 4.97 1.32l-2.1 1.21C14 5.19 13 5 12 5a8 8 0 0 0-8 8c0 2.21.89 4.21 2.34 5.65h.01c.39.39.39 1.02 0 1.41s-1.03.39-1.42.01A9.97 9.97 0 0 1 2 13A10 10 0 0 1 12 3m10 10c0 2.76-1.12 5.26-2.93 7.07c-.39.38-1.02.38-1.41-.01a.996.996 0 0 1 0-1.41A7.95 7.95 0 0 0 20 13c0-1-.19-2-.54-2.9L20.67 8C21.5 9.5 22 11.18 22 13","dashboard":"M19 5v2h-4V5zM9 5v6H5V5zm10 8v6h-4v-6zM9 17v2H5v-2zM21 3h-8v6h8zM11 3H3v10h8zm10 8h-8v10h8zm-10 4H3v6h8z","ap":"M4.93 4.93A9.97 9.97 0 0 0 2 12c0 2.76 1.12 5.26 2.93 7.07l1.41-1.41A7.94 7.94 0 0 1 4 12c0-2.21.89-4.22 2.34-5.66zm14.14 0l-1.41 1.41A7.96 7.96 0 0 1 20 12c0 2.22-.89 4.22-2.34 5.66l1.41 1.41A9.97 9.97 0 0 0 22 12c0-2.76-1.12-5.26-2.93-7.07M7.76 7.76A5.98 5.98 0 0 0 6 12c0 1.65.67 3.15 1.76 4.24l1.41-1.41A4 4 0 0 1 8 12c0-1.11.45-2.11 1.17-2.83zm8.48 0l-1.41 1.41A4 4 0 0 1 16 12c0 1.11-.45 2.11-1.17 2.83l1.41 1.41A5.98 5.98 0 0 0 18 12c0-1.65-.67-3.15-1.76-4.24M12 10a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cube":"M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.99.99 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88zM12 4.15L6.04 7.5L12 10.85l5.96-3.35zM5 15.91l6 3.38v-6.71L5 9.21zm14 0v-6.7l-6 3.37v6.71z","swap":"m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z","wrench":"m22.61 19l-9.08-9.09c.93-2.34.47-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.5L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.39-.4.39-1.01 0-1.4m-3 1.59l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24L7.24 3c1.26-.05 2.49.39 3.44 1.33a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.46 9.45z","alert":"M11 15h2v2h-2zm0-8h2v6h-2zm1-5C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 18a8 8 0 0 1-8-8a8 8 0 0 1 8-8a8 8 0 0 1 8 8a8 8 0 0 1-8 8","check":"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z","restore":"M12 3a9 9 0 0 0-9 9H0l4 4l4-4H5a7 7 0 0 1 7-7a7 7 0 0 1 7 7a7 7 0 0 1-7 7c-1.5 0-2.91-.5-4.06-1.3L6.5 19.14A9.1 9.1 0 0 0 12 21a9 9 0 0 0 9-9a9 9 0 0 0-9-9m2 9a2 2 0 0 0-2-2a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2","layers":"m12 18.54l7.37-5.74L21 14.07l-9 7l-9-7l1.62-1.26zM12 16L3 9l9-7l9 7zm0-11.47L6.26 9L12 13.47L17.74 9z","close":"M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z","docker":"M21.81 10.25c-.06-.04-.56-.43-1.64-.43c-.28 0-.56.03-.84.08c-.21-1.4-1.38-2.11-1.43-2.14l-.29-.17l-.18.27c-.24.36-.43.77-.51 1.19c-.2.8-.08 1.56.33 2.21c-.49.28-1.29.35-1.46.35H2.62c-.34 0-.62.28-.62.63c0 1.15.18 2.3.58 3.38c.45 1.19 1.13 2.07 2 2.61c.98.6 2.59.94 4.42.94c.79 0 1.61-.07 2.42-.22c1.12-.2 2.2-.59 3.19-1.16A8.3 8.3 0 0 0 16.78 16c1.05-1.17 1.67-2.5 2.12-3.65h.19c1.14 0 1.85-.46 2.24-.85c.26-.24.45-.53.59-.87l.08-.24zm-17.96.99h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H3.85c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.43 0h1.76c.08 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16H6.28c-.09 0-.16.07-.16.16v1.58c.01.09.07.16.16.16m2.47 0h1.75c.1 0 .17-.07.17-.16V9.5c0-.08-.06-.16-.17-.16H8.75c-.08 0-.15.07-.15.16v1.58c0 .09.06.16.15.16m2.44 0h1.77c.08 0 .15-.07.15-.16V9.5c0-.08-.06-.16-.15-.16h-1.77c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16M6.28 9h1.76c.08 0 .16-.09.16-.18V7.25c0-.09-.07-.16-.16-.16H6.28c-.09 0-.16.06-.16.16v1.57c.01.09.07.18.16.18m2.47 0h1.75c.1 0 .17-.09.17-.18V7.25c0-.09-.06-.16-.17-.16H8.75c-.08 0-.15.06-.15.16v1.57c0 .09.06.18.15.18m2.44 0h1.77c.08 0 .15-.09.15-.18V7.25c0-.09-.07-.16-.15-.16h-1.77c-.08 0-.15.06-.15.16v1.57c0 .09.07.18.15.18m0-2.28h1.77c.08 0 .15-.07.15-.16V5c0-.1-.07-.17-.15-.17h-1.77c-.08 0-.15.06-.15.17v1.56c0 .08.07.16.15.16m2.46 4.52h1.76c.09 0 .16-.07.16-.16V9.5c0-.08-.07-.16-.16-.16h-1.76c-.08 0-.15.07-.15.16v1.58c0 .09.07.16.15.16","clock":"M12 20a8 8 0 0 0 8-8a8 8 0 0 0-8-8a8 8 0 0 0-8 8a8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10a10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67l-.75 1.23L11 13V7z","refresh":"M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8a8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6a6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z","dns":"M7 9a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1M7 19a2 2 0 0 1-2-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2a2 2 0 0 1-2 2m13-6H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1","devices":"M3 6h18V4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3zm10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.34 1-2.22s-.39-1.67-1-2.22zm-2 5.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5s1.5.67 1.5 1.5s-.67 1.5-1.5 1.5M22 8h-6c-.5 0-1 .5-1 1v10c0 .5.5 1 1 1h6c.5 0 1-.5 1-1V9c0-.5-.5-1-1-1m-1 10h-4v-8h4z","key":"M22 18v4h-4v-3h-3v-3h-3l-2.26-2.26c-.55.17-1.13.26-1.74.26a6 6 0 0 1-6-6a6 6 0 0 1 6-6a6 6 0 0 1 6 6c0 .61-.09 1.19-.26 1.74zM7 5a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2","cog":"M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64z","web":"M16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2m-5.15 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56M14.34 14H9.66c-.1-.66-.16-1.32-.16-2s.06-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2M12 19.96c-.83-1.2-1.5-2.53-1.91-3.96h3.82c-.41 1.43-1.08 2.76-1.91 3.96M8 8H5.08A7.92 7.92 0 0 1 9.4 4.44C8.8 5.55 8.35 6.75 8 8m-2.92 8H8c.35 1.25.8 2.45 1.4 3.56A8 8 0 0 1 5.08 16m-.82-2C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2M12 4.03c.83 1.2 1.5 2.54 1.91 3.97h-3.82c.41-1.43 1.08-2.77 1.91-3.97M18.92 8h-2.95a15.7 15.7 0 0 0-1.38-3.56c1.84.63 3.37 1.9 4.33 3.56M12 2C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2","download":"M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z","logout":"m17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5M4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4z"};
 const SVC_ICON = {vaultwarden: 'shield', homepage: 'dashboard', speedtest: 'speed', immich: 'images', unifi: 'ap', npm: 'dns'};
+// A service's icon: the image the agent downloaded and keeps (from its link,
+// or dashboard-icons by name), else one of the page's own.
+const svcIcon = name => {
+  const v = st?.services.find(x => x.name === name)?.icon_v;
+  return v ? `<img class="icon svc-img" src="icons/${encodeURIComponent(name)}?v=${esc(v)}" alt="">` : icon(SVC_ICON[name] || 'cube');
+};
 const STATES = {
   NORMAL: {label: 'No servidor', c: 'var(--success)'},
   FAILING_OVER: {label: 'Failover em curso', c: 'var(--warning)', busy: true},
@@ -662,7 +700,7 @@ const pill = s => {
   const ring = s.state === 'NORMAL' && s.fail_since && !s.server_ok
     ? `<span class="ring" style="--p:${Math.min(100, Math.round(minsSince(s.fail_since) / s.wait_min * 100))}"></span>` : '';
   return `<button class="pill ${S.busy ? 'busy' : ''} ${fine(s) ? 'quiet' : ''}" data-panel="svc" data-svc="${esc(s.name)}" data-flip="${esc(s.name)}"
-    style="--c:${S.c}" title="${esc(S.label)}. Ver detalhes">${icon(SVC_ICON[s.name])}${esc(s.name)}${S.busy ? '<span class="dot"></span>' : ring}</button>`;
+    style="--c:${S.c}" title="${esc(S.label)}. Ver detalhes">${svcIcon(s.name)}${esc(s.name)}${S.busy ? '<span class="dot"></span>' : ring}</button>`;
 };
 
 // Heartbeat bars: the last checks of the server's NPM or of one service, newest on the right.
@@ -855,6 +893,7 @@ function renderGlobal() {
   $('banner').style.setProperty('--c', st.router_ok ? 'var(--warning)' : 'var(--error)');
   $('bannerText').textContent = banner;
   $('pwBanner').hidden = !st.default_password;
+  $('setupBanner').hidden = !st.setup_pending;
 }
 
 function maintSwitch(s) {
@@ -888,7 +927,7 @@ function renderServices() {
   paint('svcs', shown.map(s => {
     const S = look(s);
     return `<article class="card svc ${fine(s) ? '' : 'alert'}" id="svc-${esc(s.name)}" data-panel="svc" data-svc="${esc(s.name)}" style="--accent:${S.c}">
-      <div class="svc-top"><span class="svc-icon">${icon(SVC_ICON[s.name])}</span>
+      <div class="svc-top"><span class="svc-icon">${svcIcon(s.name)}</span>
         <h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}</button></h3>
         <span class="sdot" title="${esc(S.label)}"></span></div>
       ${fine(s) ? `<p class="svc-line">No servidor${lastMs(s.name)}</p>` : statusBlock(s)}
@@ -916,7 +955,7 @@ const evItem = (e, fresh = false, withSvc = true) => `<li class="ev ${fresh ? 'f
 
 // Every event (30 days) is fetched once, when the tab or a service panel
 // first needs it; after that the ones in each status are merged on top.
-let evAll = null, evShown = 100, seen = null, evLoading = false;
+let evAll = null, evShown = 100, seen = null, evLoading = false, evMatch = [];
 const evKey = e => e.t + e.svc + e.msg;
 // force: fetch again even when loaded (the status skipped some).
 async function loadEvents(force = false) {
@@ -926,6 +965,8 @@ async function loadEvents(force = false) {
     const r = toLogin(await fetch('api/events', {cache: 'no-store'}));
     // seen = null: what the list gains now is history, not news
     if (r.ok) { evAll = await r.json(); seen = null; if (st) renderAll(); }
+  } catch {
+    // no answer: the tab shows the recent ones and the next visit tries again
   } finally { evLoading = false; }
 }
 function mergeEvents() {
@@ -956,13 +997,19 @@ function renderEvents() {
   const opts = `<option value="">Todos os serviços</option><option value="-">Global</option>${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}`;
   if (painted.evOpts !== opts) {
     painted.evOpts = opts;
+    const wasTyping = document.activeElement?.id === 'evQuery', wasCaret = document.activeElement?.selectionStart ?? rawQ.length;
     paint('evFilters', `<select id="evSvc" aria-label="Serviço">${opts}</select>
-      <input type="search" id="evQuery" placeholder="Procurar nos eventos…" aria-label="Procurar nos eventos">`);
+      <input type="search" id="evQuery" placeholder="Procurar nos eventos…" aria-label="Procurar nos eventos">
+      <button type="button" class="btn" id="evExport" title="Os eventos deste filtro, para abrir numa folha de cálculo">${icon('download')}Exportar CSV</button>`);
+    const typing = wasTyping, caret = wasCaret;
     $('evSvc').value = f;
     $('evQuery').value = rawQ;
+    if (typing) { $('evQuery').focus(); $('evQuery').setSelectionRange(caret, caret); }
   }
   const all = eventsNow();
   const match = all.filter(e => (!f || (f === '-' ? !e.svc : e.svc === f)) && (!q || norm(e.msg).includes(q) || norm(e.svc).includes(q)));
+  evMatch = match;
+  if ($('evExport')) { $('evExport').disabled = !evAll; $('evExport').title = evAll ? 'Os eventos deste filtro, para abrir numa folha de cálculo' : 'A carregar o histórico…'; }
   const evs = match.slice(0, evShown);
   $('evCount').textContent = `${match.length} ${match.length === 1 ? 'evento' : 'eventos'} · 30 dias`;
   paint('events', evs.length ? evs.map(e => evItem(e, seen && !seen.has(evKey(e)) && !reduceMotion.matches)).join('')
@@ -976,6 +1023,7 @@ let panel = null;
 function openPanel(kind, name) {
   if (kind === 'svc') loadEvents();
   panel = {kind, name};
+  if (kind === 'svcEdit') loadServiceForm(panel);
   painted.panelHead = painted.panelBody = painted.panelFoot = null;
   renderPanel();
   if (!$('panel').open) $('panel').showModal();
@@ -986,7 +1034,7 @@ function serverPanel() {
     const S = look(s);
     const onServer = !st.router_ok ? chip('Por verificar', 'var(--neutral)', 'xs')
       : s.server_ok ? chip('A responder', 'var(--success)', 'xs') : chip(`Em falha${s.fail_since ? ' ' + ago(s.fail_since) : ''}`, 'var(--warning)', 'xs');
-    return `<li><span style="color:${S.c}">${icon(SVC_ICON[s.name])}</span>
+    return `<li><span style="color:${S.c}">${svcIcon(s.name)}</span>
       <span class="grow"><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}">${esc(s.name)}</button> <span class="mono muted">${esc(s.host)}</span></span>
       ${s.state !== 'NORMAL' ? chip(S.label, S.c, 'xs') : ''}${onServer}</li>`;
   }).join('');
@@ -1018,7 +1066,7 @@ function tnasPanel() {
         : c.present === 1 ? `A imagem de que os failovers precisam está no TNAS, ${bytes(c.size)}.`
         : `As ${c.present} imagens de que os failovers precisam estão no TNAS, ${bytes(c.size)} no total.`}</p>
       <p class="note-text">Verificado ${esc(ago(st.images_at))}, a partir dos composes do espelho, com os overrides aplicados.</p>`;
-  const stacks = allStacks().map(name => `<div class="stack"><div class="stack-name">${icon(SVC_ICON[name])}${name === 'npm' ? 'NPM do TNAS' : esc(name)}</div>${imageList(name)}</div>`).join('');
+  const stacks = allStacks().map(name => `<div class="stack"><div class="stack-name">${svcIcon(name)}${name === 'npm' ? 'NPM do TNAS' : esc(name)}</div>${imageList(name)}</div>`).join('');
   return {
     head: `<span class="node-icon st st-${tnasHealth().s}" title="${esc(tnasHealth().why)}">${icon('nas')}</span><div class="node-id"><h2 id="panelTitle">TNAS</h2>${mono(st.tnas_ip)}</div>${tnasChip()}`,
     body: sec('Estado', kv([
@@ -1031,7 +1079,7 @@ function tnasPanel() {
         n.snapshot && ['Snapshot', mono(n.snapshot)],
         n.snapshot && ['Desde', esc(when(n.since))],
       ]) + '<p class="note-text">Arranca com o primeiro failover, a partir de um snapshot do espelho, e para quando o último serviço regressa.</p>')
-      + sec('Cópias a correr', copies.length ? `<ul class="list">${copies.map(s => `<li><span style="color:${look(s).c}">${icon(SVC_ICON[s.name])}</span>
+      + sec('Cópias a correr', copies.length ? `<ul class="list">${copies.map(s => `<li><span style="color:${look(s).c}">${svcIcon(s.name)}</span>
           <span class="grow"><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}">${esc(s.name)}</button>
           <span class="mono muted">${esc((s.snapshot || '').split('/').pop())}</span></span>
           ${s.dns ? chip('DNS → TNAS', 'var(--info)', 'xs') : ''}${chip(look(s).label, look(s).c, 'xs')}</li>`).join('')}</ul>`
@@ -1051,12 +1099,118 @@ function minuteSelect(s, field, min) {
     ${opts.map(m => `<option value="${m}" ${m === v ? 'selected' : ''}>${m} min</option>`).join('')}</select>`;
 }
 
+// The service form: new (no name) or editing one. Its data (the mirror's
+// folders, the override) is fetched once when it opens.
+async function loadServiceForm(p) {
+  try {
+    const [dirs, override] = await Promise.all([
+      fetch('api/mirror', {cache: 'no-store'}).then(r => toLogin(r).json()),
+      p.name ? fetch(`api/service/override?name=${encodeURIComponent(p.name)}`, {cache: 'no-store'}).then(r => toLogin(r).text()) : ''],
+    );
+    p.data = {dirs, override};
+  } catch (err) {
+    p.data = {dirs: [], override: '', err: err.message};
+  }
+  if (panel === p) { painted.panelHead = painted.panelBody = painted.panelFoot = null; renderPanel(); }
+}
+const optMinutes = (v, min) => [...new Set([...MINUTES.filter(m => m >= min), v])].sort((a, b) => a - b)
+  .map(m => `<option value="${m}" ${m === v ? 'selected' : ''}>${m} min</option>`).join('');
+function svcEditPanel() {
+  const s = st.services.find(x => x.name === panel.name), isNew = !s;
+  const head = `<span class="svc-icon">${isNew ? icon('cube') : svcIcon(s.name)}</span>
+    <div class="node-id"><h2 id="panelTitle">${isNew ? 'Novo serviço' : `Editar ${esc(s.name)}`}</h2><span class="muted">${isNew ? 'Uma pasta do espelho com docker-compose.yml' : mono(s.host)}</span></div>`;
+  if (!panel.data) return {head, body: '<p class="note-text" style="padding-top:20px">A carregar…</p>'};
+  const v = s || {name: '', dir: '', host: '', wait_min: 5, stability_min: 10, icon: '', require_free_ip: ''};
+  const home = isNew || s.state === 'NORMAL';
+  const dirs = panel.data.dirs.map(d => d.dir);
+  if (v.dir && !dirs.includes(v.dir)) dirs.unshift(v.dir);
+  const field = (k, l, input, h = '') => `<label class="set-field" data-k="${k}"><span class="set-label">${l}</span>
+    <span class="set-input">${input}</span>${h ? `<small class="set-help">${h}</small>` : ''}<small class="field-err" role="alert"></small></label>`;
+  const body = `<form id="svcForm" novalidate autocomplete="off">
+    ${panel.data.err ? `<p class="bad-text">Não consegui ler o espelho: ${esc(panel.data.err)}</p>` : ''}
+    <div class="sec"><fieldset>
+      ${field('name', 'Nome', `<input name="name" value="${esc(v.name)}" ${isNew ? 'required' : 'disabled'} spellcheck="false" pattern="[a-z0-9][a-z0-9_-]*">`,
+        isNew ? 'Minúsculas, números, - e _. Não muda depois: entra nos nomes dos projetos e dos snapshots.' : 'Não muda. Para outro nome, remove e adiciona.')}
+      ${field('icon', 'Ícone', `<span class="icon-url"><span class="svc-icon">${isNew ? icon('cube') : svcIcon(s.name)}</span>
+        <input name="icon" value="${esc(v.icon)}" placeholder="https://…/logo.svg" spellcheck="false" inputmode="url"></span>`,
+        'Um link para uma imagem (SVG, PNG, WebP…): o agente descarrega-a uma vez e guarda-a, a página nunca vai à internet. Vazio: o ícone do <a href="https://github.com/homarr-labs/dashboard-icons" target="_blank" rel="noopener">dashboard-icons</a> com o nome do serviço ou da pasta, se existir.')}
+    </fieldset></div>
+    <div class="sec"><h3>No failover</h3><fieldset ${home ? '' : 'disabled'}>
+      ${home ? '' : '<p class="note-text">A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.</p>'}
+      ${field('dir', 'Pasta no espelho', `<select name="dir">${dirs.length ? '' : '<option value="">Nenhuma pasta com docker-compose.yml</option>'}${dirs.map(d => `<option ${d === v.dir ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>`)}
+      ${field('host', 'Endereço', `<input name="host" value="${esc(v.host)}" placeholder="nome.${esc(st.dns_zone)}" spellcheck="false">`, 'O nome que os clientes usam. No failover passa a apontar para o TNAS.')}
+      ${field('override_yaml', 'Override (opcional)', `<textarea name="override_yaml" rows="6" spellcheck="false" placeholder="services:&#10;  nome-no-compose:&#10;    profiles: [&quot;disabled&quot;]">${esc(panel.data.override)}</textarea>`,
+        'Junta-se ao compose do espelho no failover, por exemplo para desligar um contentor. É verificado com docker compose antes de gravar.')}
+      ${field('require_free_ip', 'IP que tem de estar livre (opcional)', `<input name="require_free_ip" value="${esc(v.require_free_ip)}" spellcheck="false">`, 'Para serviços com IP próprio na LAN: a cópia não arranca se alguém já o usa.')}
+    </fieldset></div>
+    <div class="sec"><h3>Quando</h3><fieldset>
+      ${field('wait_min', 'Espera antes do failover', `<select name="wait_min">${optMinutes(v.wait_min, 1)}</select>`)}
+      ${field('stability_min', 'Estabilidade antes do regresso', `<select name="stability_min">${optMinutes(v.stability_min, 0)}</select>`)}
+      ${field('kuma_token', `Token do Kuma ${chip(s?.kuma_token ? 'Definido' : 'Em falta', s?.kuma_token ? 'var(--success)' : 'var(--neutral)', 'xs')}`,
+        `<input type="password" name="kuma_token" autocomplete="new-password" placeholder="${s?.kuma_token ? 'Deixa vazio para manter' : 'Opcional'}">`, 'O monitor Push do serviço no Uptime Kuma.')}
+    </fieldset></div>
+    <p class="bad-text sec-err" id="svcErr" role="alert"></p>
+  </form>`;
+  const foot = `${isNew ? '' : `<button type="button" class="btn" style="--b:var(--error)" data-remove="${esc(s.name)}" ${home ? '' : 'disabled title="Só com o serviço no servidor"'}>Remover serviço</button>`}
+    <span class="dlg-foot" style="margin:0 0 0 auto">${isNew ? '<button type="button" class="btn" data-close>Cancelar</button>'
+      : `<button type="button" class="btn" data-panel="svc" data-svc="${esc(s.name)}">Cancelar</button>`}
+    <button type="submit" form="svcForm" class="btn contained" id="svcSave">${isNew ? 'Adicionar' : 'Guardar'}</button></span>`;
+  return {head, body, foot};
+}
+async function saveService(f) {
+  const isNew = !panel.name, name = isNew ? f.elements.name.value.trim() : panel.name;
+  const body = {new: isNew, name, dir: f.elements.dir.value, host: f.elements.host.value, wait_min: Number(f.elements.wait_min.value),
+    stability_min: Number(f.elements.stability_min.value), icon: f.elements.icon.value, override_yaml: f.elements.override_yaml.value,
+    require_free_ip: f.elements.require_free_ip.value, kuma_token: f.elements.kuma_token.value};
+  f.querySelectorAll('.field-err, .sec-err').forEach(x => { x.textContent = ''; });
+  $('svcSave').disabled = true;
+  try {
+    const r = toLogin(await fetch('api/service', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}));
+    if (r.ok) {
+      toast(isNew ? `Serviço ${name} adicionado` : 'Guardado');
+      await refresh();
+      openPanel('svc', name);
+      return;
+    }
+    const j = await readErr(r);
+    const at = j.field && f.querySelector(`[data-k="${CSS.escape(j.field)}"] .field-err`);
+    if (at) { at.textContent = sentence(j.error); at.closest('.set-field').scrollIntoView({block: 'nearest'}); }
+    else $('svcErr').textContent = sentence(j.error);
+  } catch (err) {
+    $('svcErr').textContent = sentence(err.message);
+  }
+  $('svcSave').disabled = false;
+}
+async function removeService(name) {
+  if (!await confirmAction(`Remover ${name}?`, 'Sai da configuração, do estado e dos avisos do Kuma. O override, se houver, fica na pasta dos overrides. Os eventos ficam no histórico.', 'Remover')) return;
+  try {
+    const r = toLogin(await fetch('api/service/remove', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})}));
+    if (!r.ok) { toast(`Não foi possível: ${(await readErr(r)).error}`, false); return; }
+  } catch (err) {
+    toast(`Não foi possível: ${err.message}`, false);
+    return;
+  }
+  $('panel').close();
+  toast(`Serviço ${name} removido`);
+  refresh();
+}
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'svcForm') return;
+  e.preventDefault();
+  saveService(e.target);
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-close]')) { $('panel').close(); return; }
+  const rm = e.target.closest('[data-remove]');
+  if (rm) removeService(rm.dataset.remove);
+});
+
 function svcPanel(s) {
   if (!s) return {head: '', body: ''};
   const S = look(s);
   const events = eventsNow().filter(e => e.svc === s.name).slice(0, 25);
   return {
-    head: `<span class="svc-icon" style="--accent:${S.c}">${icon(SVC_ICON[s.name])}</span>
+    head: `<span class="svc-icon" style="--accent:${S.c}">${svcIcon(s.name)}</span>
       <div class="node-id"><h2 id="panelTitle">${esc(s.name)}</h2>${mono(s.host)}</div>${chip(S.label, S.c, S.busy ? 'busy' : '')}`,
     body: `<div style="--accent:${S.c}">${sec('Agora', statusBlock(s))}</div>`
       + sec('Configuração', kv([
@@ -1066,7 +1220,7 @@ function svcPanel(s) {
         ['Espera antes do failover', minuteSelect(s, 'wait_min', 1)],
         ['Estabilidade antes do regresso', minuteSelect(s, 'stability_min', 0)],
         ['Manutenção', s.maint_until ? `Ligada até ${esc(clock(s.maint_until))}` : st.maint_until ? 'Global ligada' : 'Desligada'],
-      ]))
+      ]), `<button class="btn" data-panel="svcEdit" data-svc="${esc(s.name)}">${icon('wrench')}Editar</button>`)
       + (s.snapshot || s.dns ? sec('Cópia no TNAS', kv([
         s.snapshot && ['Snapshot', mono(s.snapshot)],
         ['DNS', s.dns ? `${mono(s.host)} aponta para o TNAS` : 'Sem mudança'],
@@ -1149,22 +1303,26 @@ function sectionHtml(sec) {
       <ul class="checks">${secChecks[sec.id] || ''}</ul>
     </form>
     ${sec.id === 'dns' ? `<div class="sec-sub">${kv([['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
-      <form id="tokenForm"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
-          <input type="password" id="dnsToken" autocomplete="off" required></label>
-        <p class="bad-text" id="tokenErr" role="alert"></p>
-        <div class="form-foot"><button type="submit" class="btn contained" id="tokenSave">Testar e gravar</button></div></form></div>` : ''}`;
+      <form class="token-form"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
+          <input type="password" class="dns-token" autocomplete="off" required></label>
+        <p class="bad-text token-err" role="alert"></p>
+        <div class="form-foot"><button type="submit" class="btn contained">Testar e gravar</button></div></form></div>` : ''}`;
 }
 
 // Settings, as a page, one card per section. A section with changes not yet
 // saved, or with the focus in it, is left alone by the 5 s refresh.
 const INTERVALS = [10, 15, 30, 60, 120, 300];
 const secs = v => v % 60 ? `${v} s` : `${v / 60} min`;
-function paintSec(id, html) {
-  const el = $(`set-${id}`), f = document.activeElement;
-  if (el.querySelector('form[data-dirty]') || (f && f !== document.body && el.contains(f))) return;
-  paint(`set-${id}`, html);
+// A form with changes not saved, a half-typed token or the focus inside is
+// left alone by the refresh.
+function paintGuarded(elId, html) {
+  const el = $(elId), f = document.activeElement;
+  const typing = f && el.contains(f) && f.matches('input, select, textarea'); // a button keeps the focus after a dialog: no reason to wait
+  if (el.querySelector('form[data-dirty]') || [...el.querySelectorAll('.dns-token')].some(x => x.value) || typing) return;
+  paint(elId, html);
 }
-function repaintSec(id) { painted[`set-${id}`] = null; renderSettings(); }
+const paintSec = (id, html) => paintGuarded(`set-${id}`, html);
+function repaintSec(id) { painted[`set-${id}`] = painted['wiz-body'] = null; renderSettings(); renderWizard(); }
 function renderSettings() {
   if (!$('set-geral')) {
     $('settingsBody').innerHTML = ['geral', ...SECTIONS.map(x => x.id), 'conta'].map(id => `<section class="card set-sec" id="set-${id}"></section>`).join('');
@@ -1185,6 +1343,78 @@ function renderSettings() {
       <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>`);
 }
 
+// The first-start guide, for a new install: the forms of Definições, one step
+// at a time, then the services. It can be left and taken up again.
+const WIZ = [{id: 'conta', t: 'Conta'}, {id: 'rede', t: 'Rede'}, {id: 'dns', t: 'DNS'}, {id: 'kuma', t: 'Uptime Kuma'},
+  {id: 'caminhos', t: 'Caminhos'}, {id: 'servicos', t: 'Serviços'}, {id: 'fim', t: 'Concluir'}];
+const WIZ_INTRO = {
+  conta: 'Primeiro, uma password só tua: a de fábrica (admin / admin) é a mesma em todas as instalações.',
+  rede: 'Onde estão o servidor, o TNAS e o router. O agente corre no TNAS e verifica o servidor daqui.',
+  dns: 'O Technitium onde o agente aponta o nome de um serviço para o TNAS durante um failover. Sem o token, um failover dá erro.',
+  kuma: 'Opcional: o agente avisa o Uptime Kuma a cada verificação, um monitor Push por token.',
+  caminhos: 'O espelho do servidor no TNAS (um subvolume Btrfs), a pasta dos snapshots e a dos overrides.',
+  servicos: 'Os serviços que podem passar para o TNAS. Cada um é uma pasta do espelho com docker-compose.yml.',
+  fim: 'O agente começa em observação: regista o que faria, sem agir. Quando confiares no que vês nos eventos, passa a automático em Definições → Geral.',
+};
+const wizIndex = () => Math.max(0, WIZ.findIndex(x => x.id === hashParts()[1]));
+function wizStepHtml(id) {
+  const intro = `<p class="note-text wiz-intro">${esc(WIZ_INTRO[id])}</p>`;
+  const ok = (good, yes, no) => chip(good ? yes : no, good ? 'var(--success)' : 'var(--warning)', 'xs');
+  switch (id) {
+    case 'conta':
+      return `<h2>Conta</h2>${intro}${st.default_password ? `<div class="sec-btns"><button class="btn contained" data-pw>${icon('key')}Mudar a password</button></div>`
+        : `<p class="ok-text wiz-done">${icon('check')}A password já não é a de fábrica.</p>`}`;
+    case 'servicos':
+      return `<h2>Serviços</h2>${intro}<ul class="list wiz-svcs">${st.services.map(s => `<li><span class="svc-icon">${svcIcon(s.name)}</span>
+          <span class="grow"><strong>${esc(s.name)}</strong> <span class="mono muted">${esc(s.host)}</span></span>
+          <button class="btn" data-panel="svcEdit" data-svc="${esc(s.name)}">Editar</button></li>`).join('') || '<li class="empty">Ainda nenhum.</li>'}</ul>
+        <div class="sec-btns"><button class="btn contained" data-panel="svcEdit">+ Adicionar serviço</button></div>`;
+    case 'fim':
+      return `<h2>Concluir</h2>${intro}${kv([['Password', ok(!st.default_password, 'Mudada', 'Ainda a de fábrica')],
+        ['Token do DNS', ok(st.dns_token, 'Definido', 'Em falta')], ['Serviços', esc(String(st.services.length))],
+        ['Modo', st.mode === 'auto' ? 'Automático' : 'Observação']])}`;
+    default:
+      return sectionHtml(SECTIONS.find(x => x.id === id)).replace(/^<h2>[^<]*<\/h2>/, h => h + intro);
+  }
+}
+function renderWizard() {
+  if (currentTab() !== 'setup') return;
+  const i = wizIndex();
+  paint('wizSteps', WIZ.map((x, j) => `<a href="#/assistente/${x.id}" ${j === i ? 'aria-current="true"' : ''}><span class="wiz-n">${j + 1}</span>${esc(x.t)}</a>`).join(''));
+  paintGuarded('wiz-body', wizStepHtml(WIZ[i].id));
+  $('wizPrev').disabled = i === 0;
+  $('wizNext').textContent = i === WIZ.length - 1 ? 'Concluir' : 'Seguinte';
+  $('wizPos').textContent = `Passo ${i + 1} de ${WIZ.length}`;
+}
+// Leaving a step with changes not saved asks first, whichever way: the step
+// list, Anterior, Seguinte or Continuar mais tarde.
+const wizDirty = () => !!document.querySelector('#wiz-body form[data-dirty]') || [...document.querySelectorAll('#wiz-body .dns-token')].some(x => x.value);
+const wizLeave = () => !wizDirty() || confirmAction('Sair sem gravar?', 'Há alterações neste passo que ainda não gravaste; perdem-se.', 'Sair');
+$('page-setup').addEventListener('click', async e => {
+  const link = e.target.closest('a[href^="#"]');
+  if (!link || !wizDirty()) return;
+  e.preventDefault();
+  if (await wizLeave()) { document.querySelector('#wiz-body form[data-dirty]')?.removeAttribute('data-dirty'); location.hash = link.getAttribute('href'); }
+});
+$('wizPrev').addEventListener('click', async () => {
+  const i = wizIndex();
+  if (i > 0 && await wizLeave()) location.hash = `#/assistente/${WIZ[i - 1].id}`;
+});
+$('wizNext').addEventListener('click', async () => {
+  const i = wizIndex();
+  if (!await wizLeave()) return;
+  if (i < WIZ.length - 1) { location.hash = `#/assistente/${WIZ[i + 1].id}`; return; }
+  try {
+    const r = toLogin(await fetch('api/setup/done', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}));
+    if (!r.ok) throw new Error((await readErr(r)).error);
+    toast('Configuração inicial concluída');
+    await refresh();
+    location.hash = '#/';
+  } catch (err) {
+    toast(`Não foi possível: ${err.message}`, false);
+  }
+});
+
 // A section's form: dirty when a field differs from what the agent has.
 function formDirty(form) {
   const sec = SECTIONS.find(x => x.id === form.dataset.section);
@@ -1201,12 +1431,17 @@ function markSection(form) {
 }
 async function saveSection(form) {
   const id = form.dataset.section, sec = SECTIONS.find(x => x.id === id), values = {};
+  form.querySelectorAll('.field-err, .sec-err').forEach(x => { x.textContent = ''; });
   for (const fd of sec.fields) {
     const el = form.elements[fd.k];
     if (fd.s && !el.value) continue;
+    if (fd.n != null && el.value.trim() === '') { // Number('') would save 0
+      form.querySelector(`[data-k="${CSS.escape(fd.k)}"] .field-err`).textContent = 'Obrigatório.';
+      el.focus();
+      return;
+    }
     values[fd.k] = fd.n != null ? Number(el.value) : el.value;
   }
-  form.querySelectorAll('.field-err, .sec-err').forEach(x => { x.textContent = ''; });
   form.querySelector('[data-save]').disabled = true;
   try {
     const r = toLogin(await fetch('api/config/section', {method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1221,10 +1456,10 @@ async function saveSection(form) {
       if (CHECKED.includes(id)) runChecks(id);
       return;
     }
-    const j = await r.json().catch(() => ({}));
+    const j = await readErr(r);
     const at = j.field && form.querySelector(`[data-k="${CSS.escape(j.field)}"] .field-err`);
     if (at) at.textContent = sentence(j.error);
-    else form.querySelector('.sec-err').textContent = sentence(j.error || `HTTP ${r.status}`);
+    else form.querySelector('.sec-err').textContent = sentence(j.error);
   } catch (err) {
     form.querySelector('.sec-err').textContent = sentence(err.message);
   }
@@ -1246,13 +1481,13 @@ async function restartAgent() {
   const target = `https://${location.hostname}:${port}`;
   if (!await confirmAction('Reiniciar o agente?', `A interface volta em ${target}. Uma verificação em curso acaba primeiro.`, 'Reiniciar')) return;
   const r = toLogin(await fetch('api/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}));
-  if (!r.ok) { toast(`Não foi possível: ${(await r.text()).trim()}`, false); return; }
+  if (!r.ok) { toast(`Não foi possível: ${(await readErr(r)).error}`, false); return; }
   toast('A reiniciar…');
   await new Promise(res => setTimeout(res, 3000));
   for (const end = Date.now() + 90e3; Date.now() < end; await new Promise(res => setTimeout(res, 2000))) {
     try { await fetch(`${target}/healthz`, {mode: 'no-cors', cache: 'no-store'}); location.href = `${target}/${location.hash}`; return; } catch {}
   }
-  toast(`O agente não voltou em 90 s. Tenta abrir ${target}`, false);
+  toast(`Não consegui confirmar o regresso em 90 s. Abre ${target} e, se o browser pedir, aceita outra vez o certificado (o Firefox pede-o por porta).`, false);
 }
 document.addEventListener('input', e => { const f = e.target.closest('form.set-form'); if (f) markSection(f); });
 document.addEventListener('submit', e => {
@@ -1272,18 +1507,24 @@ document.addEventListener('click', e => {
   }
   if (e.target.closest('[data-restart]')) restartAgent();
 });
-addEventListener('beforeunload', e => { if (document.querySelector('form.set-form[data-dirty]')) e.preventDefault(); });
+addEventListener('beforeunload', e => {
+  if (document.querySelector('form.set-form[data-dirty]') || [...document.querySelectorAll('.dns-token')].some(x => x.value)) e.preventDefault();
+});
 
 function renderPanel() {
   if (!panel || !st) return;
+  if (panel.kind === 'svcEdit' && panel.drawn) return; // the form is drawn once: the refresh never undoes what is typed
+  const found = st.services.find(s => s.name === panel.name);
+  if (panel.kind === 'svc' && !found) { $('panel').close(); return; } // removed meanwhile
   const p = panel.kind === 'server' ? serverPanel() : panel.kind === 'tnas' ? tnasPanel()
-    : svcPanel(st.services.find(s => s.name === panel.name));
+    : panel.kind === 'svcEdit' ? svcEditPanel() : svcPanel(found);
   paint('panelHead', p.head);
   // a list being chosen from must not be replaced under the pointer by the refresh
   const choosing = document.activeElement?.tagName === 'SELECT' && $('panelBody').contains(document.activeElement);
   if (!choosing) paint('panelBody', p.body);
   paint('panelFoot', p.foot || '');
   $('panelFoot').hidden = !p.foot;
+  if (panel.kind === 'svcEdit' && panel.data) panel.drawn = true;
   fillBeats();
 }
 
@@ -1297,7 +1538,7 @@ function toast(msg, ok = true) {
   setTimeout(() => el.remove(), ok ? 4000 : 9000);
 }
 
-function renderAll() { renderGlobal(); renderTopology(); renderServices(); renderEvents(); renderSettings(); renderPanel(); }
+function renderAll() { renderGlobal(); renderTopology(); renderServices(); renderEvents(); renderSettings(); renderWizard(); renderPanel(); }
 
 async function post(path, body, done, key, value = true) {
   pending.set(key, value);
@@ -1305,7 +1546,7 @@ async function post(path, body, done, key, value = true) {
   let ok = false;
   try {
     const r = toLogin(await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}));
-    if (!r.ok) throw new Error((await r.text()).trim() || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error((await readErr(r)).error);
     toast(done);
     ok = true;
   } catch (e) {
@@ -1326,6 +1567,13 @@ function confirmAction(title, body, ok) {
   return new Promise(res => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok'), {once: true}));
 }
 
+// What an answer that failed says: {field, error} from JSON, else its text.
+async function readErr(r) {
+  const t = (await r.text()).trim();
+  try { const j = JSON.parse(t); if (j && typeof j === 'object') return {field: j.field, error: j.error || t}; } catch {}
+  return {error: t || `HTTP ${r.status}`};
+}
+
 // The session ended (agent restarted, idle for a week, password changed elsewhere).
 const toLogin = r => { if (r.status === 401) location.href = 'login'; return r; };
 
@@ -1341,7 +1589,11 @@ async function refresh() {
     void live.offsetWidth; // restart the ripple
     live.classList.add('ping');
     renderAll();
-    if (first) { $('maintMin').value = st.default_expiry_min || 60; route(); }
+    if (first) {
+      $('maintMin').value = st.default_expiry_min || 60;
+      if (st.setup_pending && !location.hash) location.hash = '#/assistente'; // a new install starts with the guide
+      route();
+    }
   } catch (e) {
     lastOk = lastOk || -1;
   }
@@ -1429,21 +1681,24 @@ async function logout() {
 }
 // The token form is in the settings panel, drawn after this runs.
 document.addEventListener('submit', async e => {
-  if (e.target.id !== 'tokenForm') return;
+  const f = e.target.closest('.token-form');
+  if (!f) return;
   e.preventDefault();
-  $('tokenSave').disabled = true;
-  $('tokenErr').textContent = '';
+  const input = f.querySelector('.dns-token'), save = f.querySelector('[type=submit]'), err = f.querySelector('.token-err');
+  save.disabled = true;
+  err.textContent = '';
   try {
     const r = toLogin(await fetch('api/dns', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token: $('dnsToken').value})}));
-    if (!r.ok) throw new Error((await r.text()).trim() || `HTTP ${r.status}`);
-    $('dnsToken').value = '';
+      body: JSON.stringify({token: input.value})}));
+    if (!r.ok) throw new Error((await readErr(r)).error);
+    input.value = '';
+    input.blur();
     toast('Token testado e gravado');
     refresh();
-  } catch (err) {
-    $('tokenErr').textContent = cap(err.message) + '.';
+  } catch (x) {
+    err.textContent = sentence(x.message);
   } finally {
-    $('tokenSave').disabled = false;
+    save.disabled = false;
   }
 });
 $('pwBannerBtn').addEventListener('click', openPw);
@@ -1453,7 +1708,21 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('click', e => {
   if (e.target.id === 'evMoreBtn') { evShown += 100; renderEvents(); }
+  if (e.target.closest('#evExport')) exportEvents();
 });
+// Exports what the filter shows (all of it, not only the rows drawn), as CSV
+// with ; and a BOM, which a Portuguese Excel opens as columns.
+function exportEvents() {
+  // a cell Excel would read as a formula (=, +, -, @) gets a ' first: messages carry outside text
+  const q = v => `"${String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
+  const rows = evMatch.map(e => [new Date(e.t).toLocaleString('sv-SE'), e.svc || 'global', e.msg].map(q).join(';'));
+  const csv = '\ufeff' + ['"data";"serviço";"mensagem"', ...rows].join('\r\n') + '\r\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+  a.download = `failover-eventos-${new Date().toLocaleDateString('sv-SE')}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 $('pwCancel').addEventListener('click', () => $('pwDlg').close());
 $('pwForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1462,7 +1731,7 @@ $('pwForm').addEventListener('submit', async e => {
   try {
     const r = toLogin(await fetch('api/password', {method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({current: $('pwCurrent').value, new: $('pwNew').value})}));
-    if (!r.ok) throw new Error((await r.text()).trim() || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error((await readErr(r)).error);
     $('pwDlg').close();
     toast('Password alterada');
     refresh();
@@ -1478,7 +1747,7 @@ $('panelClose').addEventListener('click', () => $('panel').close());
 
 // The tab is in the address (#/eventos, #/definicoes/dns), so a reload or a
 // link from elsewhere opens it and the browser's back button moves between tabs.
-const ROUTES = {'': 'overview', eventos: 'events', definicoes: 'settings'};
+const ROUTES = {'': 'overview', eventos: 'events', definicoes: 'settings', assistente: 'setup'};
 const hashParts = () => location.hash.replace(/^#\/?/, '').split('/');
 const currentTab = () => ROUTES[hashParts()[0]] || 'overview';
 function route() {
@@ -1487,6 +1756,7 @@ function route() {
   document.querySelectorAll('[data-tab]').forEach(a => a.dataset.tab === tab ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
   document.querySelectorAll('[data-sub]').forEach(a => tab === 'settings' && a.dataset.sub === sub ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current'));
   if (tab === 'events') loadEvents();
+  if (tab === 'setup') { document.activeElement?.blur(); $('wiz-body').innerHTML = ''; painted['wiz-body'] = null; } // a new step
   if (st) renderAll();
   if (tab === 'settings') $(`set-${sub}`)?.scrollIntoView({block: 'start'});
   if (tab === 'overview') requestAnimationFrame(() => st && renderWires()); // it had no size while hidden

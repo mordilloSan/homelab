@@ -30,6 +30,7 @@ type fake struct {
 	getErr   map[string]error  // URL prefix → Get fails with this
 	left     map[string]string // compose project → ids docker ps / volume ls still list
 	noNet    map[string]bool   // ip → its DNS resolver does not reach the internet
+	bodies   map[string][]byte // exact URL → what Get answers
 }
 
 func (f *fake) Resolve(ip string) error {
@@ -106,6 +107,9 @@ func (f *fake) Get(u, bearer string) ([]byte, error) {
 			return nil, err
 		}
 	}
+	if b, ok := f.bodies[u]; ok {
+		return b, nil
+	}
 	if bearer != "" && bearer == f.badToken {
 		return []byte(`{"status":"invalid-token","errorMessage":"Invalid token or session expired."}`), nil
 	}
@@ -154,6 +158,7 @@ func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(a.iconJobs.Wait) // before the temporary folder goes
 	return a
 }
 

@@ -149,7 +149,7 @@ func (a *Agent) postSection(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := next.validate(); err != nil {
 		var fe *FieldError
-		if errors.As(err, &fe) {
+		if errors.As(err, &fe) && slices.ContainsFunc(settings, func(s setting) bool { return s.key == fe.Field && s.section == req.Section }) {
 			fieldErr(w, fe.Field, fe.Msg)
 		} else {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -251,6 +251,15 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// postSetupDone records that the first-start guide was finished.
+func (a *Agent) postSetupDone(w http.ResponseWriter, _ *http.Request) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.st.SetupPending = false
+	a.now = time.Now()
+	a.done(w, "", "configuração inicial concluída")
 }
 
 // SetRestart is how the UI ends the agent so Docker starts it again.

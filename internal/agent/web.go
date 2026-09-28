@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -44,6 +45,12 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("POST /api/config/section", a.postSection)
 	mux.HandleFunc("POST /api/config/check", a.postCheck)
 	mux.HandleFunc("POST /api/restart", a.postRestart)
+	mux.HandleFunc("POST /api/setup/done", a.postSetupDone)
+	mux.HandleFunc("GET /api/mirror", a.getMirror)
+	mux.HandleFunc("GET /icons/{name}", a.getIcon)
+	mux.HandleFunc("GET /api/service/override", a.getServiceOverride)
+	mux.HandleFunc("POST /api/service", a.postService)
+	mux.HandleFunc("POST /api/service/remove", a.postServiceRemove)
 	mux.HandleFunc("POST /api/maintenance", a.postMaintenance)
 	mux.HandleFunc("POST /api/action", a.postAction)
 	mux.HandleFunc("POST /api/password", a.postPassword)
@@ -338,4 +345,19 @@ func (a *Agent) postDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	a.now = time.Now()
 	a.done(w, "", "token do Technitium alterado")
+}
+
+// The address the UI is on, kept next to the state: after a new ui.listen is
+// saved, the healthcheck still asks the running one until the restart.
+func runningFile(statePath string) string { return filepath.Join(filepath.Dir(statePath), "ui-listen") }
+
+func SetRunningListen(statePath, addr string) error {
+	return writeAtomic(runningFile(statePath), []byte(addr))
+}
+
+func RunningListen(statePath, fallback string) string {
+	if b, err := os.ReadFile(runningFile(statePath)); err == nil && isListen(strings.TrimSpace(string(b))) {
+		return strings.TrimSpace(string(b))
+	}
+	return fallback
 }
