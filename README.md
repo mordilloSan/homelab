@@ -48,7 +48,9 @@ O `e2e` e o `start` partilham containers: não corras os dois ao mesmo tempo. S�
 - **Configuração:** `tnas_ip` no topo (as cópias também se verificam por ele, R5); campos novos `mode`, `lan_iface`, `start_timeout_min`, `kuma.npm_token`. Guardar na interface reescreve o `failover.yml` sem comentários.
 - **DNS sempre ligado:** sem DNS a cópia não serve ninguém, por isso as fases F3 e F4 juntaram-se. Sem token do Technitium, um failover dá ERROR antes do snapshot. Um `dns.enabled` antigo é ignorado e sai do ficheiro na próxima gravação.
 - **Internet:** a cada intervalo, cada caixa pede ao seu Technitium (`server.ip` e `tnas_ip`, porta 53) um nome aleatório em `docker.io`, que nenhuma cache tem; só informa, não decide nada. O Docker Hub em HTTPS só se testa no arranque. No e2e não há Technitium, por isso a internet aparece em falta.
-- **Interface:** sai sozinha após 30 min sem atividade.
+- **Sessão:** sai sozinha após 30 min sem atividade.
+- **Interface:** três separadores (Visão geral, Eventos, Definições), com o separador no endereço (`#/eventos`, `#/definicoes/dns`). A espera e a estabilidade de cada serviço mudam-se no painel do serviço; o modo e o intervalo em Definições → Geral (passar a automático pede confirmação).
+- **Eventos:** em `state/events.jsonl`, uma linha por evento; ficam 30 dias, até 5000. Os de um `state.json` antigo passam para lá no arranque.
 - **§16:** porta 8099 em HTTP, ou HTTPS com `ui.tls_cert` e `ui.tls_key` (sem redirecionamento de HTTP); intervalo de 60 s; a manutenção bloqueia só failovers e o tempo de espera de um serviço só começa quando ela acaba; o TTL do wildcard fica no Technitium.
 - **ERROR:** a cópia é removida logo, sem nova tentativa; sai quando o serviço volta no servidor ou com **Forçar failover**. Um IP `.92` ocupado (R3) dá ERROR antes do snapshot.
 - **Caso 2.3:** um failover em curso continua.
