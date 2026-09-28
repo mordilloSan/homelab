@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // T-18: the login form (admin/admin at first), sessions, JSON only, edits
@@ -117,6 +118,69 @@ func TestUI(t *testing.T) {
 	}
 	if c, err := loadUser(a.userPath); err != nil || c.Default {
 		t.Fatalf("depois de mudar, a password por defeito ainda conta: %v", err)
+	}
+}
+
+// The DNS settings in the UI: the token is tested before it is saved, and DNS
+// cannot be turned off while a service is pointed to the TNAS.
+func TestDNSSettings(t *testing.T) {
+	a, f := setup(t)
+	post := func(body string) int {
+		t.Helper()
+		w := httptest.NewRecorder()
+		a.postDNS(w, httptest.NewRequest(http.MethodPost, "/api/dns", strings.NewReader(body)))
+		return w.Code
+	}
+	saved := func() bool {
+		t.Helper()
+		c, err := LoadConfig(a.cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.DNS.Enabled
+	}
+	tokFile := a.cfg.DNS.TokenFile
+
+	if post(`{"enabled":false}`) != 204 || a.cfg.DNS.Enabled || saved() {
+		t.Fatal("desligar não ficou aplicado e gravado")
+	}
+	if err := os.Remove(tokFile); err != nil {
+		t.Fatal(err)
+	}
+	if post(`{"enabled":true}`) != 400 || a.cfg.DNS.Enabled {
+		t.Fatal("ligou sem token")
+	}
+	f.badToken = "errado"
+	if post(`{"enabled":true,"token":"errado"}`) != 400 || a.cfg.DNS.Enabled || fileExists(tokFile) {
+		t.Fatal("token recusado pelo Technitium mas gravado ou DNS ligado")
+	}
+	if post(`{"enabled":true,"token":" novo "}`) != 204 || !a.cfg.DNS.Enabled || !saved() || !hasGet(f, "records/get?") {
+		t.Fatalf("token bom: DNS não ligado ou não testado: %v", f.gets)
+	}
+	if b, _ := os.ReadFile(tokFile); string(b) != "novo\n" {
+		t.Fatalf("token gravado: %q", b)
+	}
+	if fi, _ := os.Stat(tokFile); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("permissões do token: %v", fi.Mode().Perm())
+	}
+	if v := string(*a.view.Load()); !strings.Contains(v, `"dns_token":true`) || strings.Contains(v, "novo") {
+		t.Fatalf("o estado tem de dizer que há token, sem o mostrar: %s", v)
+	}
+
+	a.st.Services["vaultwarden"] = &SvcState{State: Active, DNS: true}
+	if post(`{"enabled":false}`) != 409 || !a.cfg.DNS.Enabled {
+		t.Fatal("desligou o DNS com um serviço apontado para o TNAS")
+	}
+}
+
+// Expired sessions are dropped when a new one is made, so the map does not grow forever.
+func TestSessionsPruned(t *testing.T) {
+	var s sessions
+	old := s.create()
+	s.m[old] = time.Now().Add(-time.Minute)
+	s.create()
+	if _, ok := s.m[old]; ok || len(s.m) != 1 {
+		t.Fatalf("sessões: %v", s.m)
 	}
 }
 

@@ -15,7 +15,7 @@ docker compose pull && docker compose up -d
 O primeiro arranque cria `config/failover.yml` (modo observe, DNS desligado), `config/user.yml` (`admin` / `admin`, em bcrypt) e os overrides em `overrides/`. Depois:
 
 1. Entra em `http://192.168.1.249:8099` e muda a password.
-2. Revê o `config/failover.yml` (tokens do Kuma, DNS) e põe o token do Technitium em `config/technitium.token`.
+2. Revê o `config/failover.yml` (tokens do Kuma, `dns.api_url` e `dns.zone`). O token do Technitium põe-se na interface, em ⚙ **Definições**, que o testa antes de o gravar em `config/technitium.token`.
 
 - **Password perdida:** `docker exec failover-agent rm /config/user.yml && docker restart failover-agent` volta a `admin` / `admin`.
 - **Atualizar:** tag nova e `docker compose pull && docker compose up -d`. A versão instalada: `docker compose run --rm failover-agent version`.
@@ -27,8 +27,8 @@ Antes de ligar, confirma nos composes do servidor: o ML do Immich chama-se `immi
 | Fase | Configuração |
 |---|---|
 | F2 observação | `mode: observe` — as decisões só ficam nos eventos |
-| F3 ações sem DNS | `dns.enabled: false` + botões **Forçar failover** / **Forçar regresso** |
-| F4 DNS | `dns.enabled: true` no ficheiro e `docker compose restart` |
+| F3 ações sem DNS | DNS desligado + botões **Forçar failover** / **Forçar regresso** |
+| F4 DNS | ⚙ **Definições** → DNS ligado (grava `dns.enabled` no ficheiro, sem reiniciar). Só se desliga sem serviços com o DNS a apontar para o TNAS |
 | F6 automático | `mode: auto` na interface |
 
 ## Desenvolvimento

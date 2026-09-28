@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,14 +18,17 @@ import (
 
 // fake is the TNAS as the agent sees it: pings, HTTPS checks and commands.
 type fake struct {
-	mu      sync.Mutex
-	cmds    []string        // every command except ping, in order
-	gets    []string        // every URL fetched
-	noPing  map[string]bool // ip → does not answer ping
-	down    map[string]bool // "host@ip" → HTTPS check fails
-	failCmd []string        // command prefixes that fail
-	outs    map[string]string
-	scans   []string // commands run through Output
+	mu       sync.Mutex
+	cmds     []string        // every command except ping, in order
+	gets     []string        // every URL fetched
+	noPing   map[string]bool // ip → does not answer ping
+	down     map[string]bool // "host@ip" → HTTPS check fails
+	failCmd  []string        // command prefixes that fail
+	outs     map[string]string
+	scans    []string          // commands run through Output
+	badToken string            // the Technitium refuses this bearer token
+	getErr   map[string]error  // URL prefix → Get fails with this
+	left     map[string]string // compose project → ids docker ps / volume ls still list
 }
 
 func (f *fake) Run(name string, args ...string) error {
@@ -58,6 +63,9 @@ func (f *fake) Output(name string, args ...string) (string, error) {
 	defer f.mu.Unlock()
 	c := strings.Join(append([]string{name}, args...), " ")
 	f.scans = append(f.scans, c)
+	if name == "docker" && (args[0] == "ps" || args[0] == "volume") { // what compose down left behind
+		return f.left[strings.TrimPrefix(args[len(args)-1], "label=com.docker.compose.project=")], nil
+	}
 	best := ""
 	for p := range f.outs { // the longest matching prefix wins, whatever the map order
 		if strings.HasPrefix(c, p) && len(p) > len(best) {
@@ -79,10 +87,18 @@ func (f *fake) Check(host, ip string) error {
 	return nil
 }
 
-func (f *fake) Get(u, _ string) ([]byte, error) {
+func (f *fake) Get(u, bearer string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.gets = append(f.gets, u)
+	for p, err := range f.getErr {
+		if strings.HasPrefix(u, p) {
+			return nil, err
+		}
+	}
+	if bearer != "" && bearer == f.badToken {
+		return []byte(`{"status":"invalid-token","errorMessage":"Invalid token or session expired."}`), nil
+	}
 	return []byte(`{"status":"ok","ok":true}`), nil
 }
 
@@ -180,6 +196,81 @@ func TestRunStops(t *testing.T) {
 	}
 	if _, err := os.Stat(a.statePath); err != nil {
 		t.Fatalf("o tick não acabou: %v", err)
+	}
+}
+
+// logs sends slog to a buffer for the rest of the test.
+func logs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	return &buf
+}
+
+// The start logs what the agent can reach; a failure is a warning, never a stop.
+func TestPreflight(t *testing.T) {
+	a, f := setup(t)
+	buf := logs(t)
+	f.noPing[srv] = true
+	f.getErr = map[string]error{"https://registry-1.docker.io": errors.New("HTTP 401")} // no login: reached
+	f.badToken = "secret"
+	a.Preflight()
+	out := buf.String()
+	for _, want := range []string{
+		`level=INFO msg="arranque: ping ao router 192.168.1.1"`,
+		`level=INFO msg="arranque: ping ao TNAS 192.168.1.249"`,
+		`level=WARN msg="arranque: ping ao servidor 192.168.1.66 falhou"`,
+		`level=INFO msg="arranque: NPM do servidor (https://nginx.engmariz.com)"`,
+		`level=INFO msg="arranque: internet (registry-1.docker.io)"`,
+		`level=WARN msg="arranque: token do Technitium (http://127.0.0.1:5380) falhou" error="technitium invalid-token`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("falta %s em:\n%s", want, out)
+		}
+	}
+}
+
+// R1 checked: a return that leaves a container behind is not finished, and
+// every step that is done is in the events.
+func TestReturnLeftovers(t *testing.T) {
+	a, f := setup(t)
+	f.down["bitwarden.engmariz.com@"+srv] = true
+	at := t0
+	tickTo(a, &at, 5)
+	snap := a.st.Services["vaultwarden"].Snapshot
+	delete(f.down, "bitwarden.engmariz.com@"+srv)
+	f.left = map[string]string{"failover-vaultwarden": "abc123"}
+	tickTo(a, &at, 16)
+	if s := a.st.Services["vaultwarden"]; s.State != Returning || !strings.Contains(s.Msg, "abc123") || s.Snapshot != snap {
+		t.Fatalf("regresso com um container a sobrar: %s %q", s.State, s.Msg)
+	}
+	f.left = nil
+	a.Tick(at)
+	wantStates(t, a, map[string]string{"vaultwarden": Normal})
+	for _, want := range []string{"containers e volumes de failover-vaultwarden removidos", "snapshot " + filepath.Base(snap) + " apagado",
+		"containers e volumes de failover-npm removidos", "NPM do TNAS parado"} {
+		if !hasEvent(a, want) {
+			t.Errorf("sem o evento %q: %v", want, a.st.Events)
+		}
+	}
+}
+
+// DNS turned on in the UI during a failover: the record is added on the next tick.
+func TestDNSOnWhileActive(t *testing.T) {
+	a, f := setup(t)
+	a.cfg.DNS.Enabled = false
+	f.down["bitwarden.engmariz.com@"+srv] = true
+	at := t0
+	tickTo(a, &at, 5)
+	if state(a, "vaultwarden") != Active || hasGet(f, "records/add?") {
+		t.Fatalf("failover sem DNS: estado %s, pedidos %v", state(a, "vaultwarden"), f.gets)
+	}
+	a.cfg.DNS.Enabled = true
+	a.Tick(at)
+	if !a.st.Services["vaultwarden"].DNS || !hasGet(f, "records/add?") || !hasGet(f, "domain=bitwarden.engmariz.com") {
+		t.Fatalf("DNS ligado com o serviço em failover: o registo não foi criado: %v", f.gets)
 	}
 }
 
@@ -414,7 +505,7 @@ func TestDeleteSnapshotGuard(t *testing.T) {
 	a, f := setup(t)
 	d := a.cfg.Paths.SnapshotsDir
 	for _, p := range []string{"/Volume1/ServerBackup", d, d + "/other", d + "/failover-x/../../x", "/Volume1/failover-x"} {
-		if err := a.deleteSnapshot(p); err == nil {
+		if err := a.deleteSnapshot("x", p); err == nil {
 			t.Errorf("aceitou apagar %s", p)
 		}
 	}
@@ -427,6 +518,7 @@ func TestDeleteSnapshotGuard(t *testing.T) {
 // included) and reports the ones the TNAS does not have.
 func TestScanImages(t *testing.T) {
 	a, f := setup(t)
+	buf := logs(t)
 	f.outs = map[string]string{
 		"docker compose -p failover-immich":                             "ghcr.io/immich-app/immich-server:v2\nredis:7\nredis:7\n",
 		"docker compose -p failover-":                                   "vaultwarden/server:latest\n",
@@ -451,6 +543,9 @@ func TestScanImages(t *testing.T) {
 	}
 	f.outs["docker image inspect --format {{.Size}} {{.Created}} ghcr.io"] = "1 2026-09-22T04:00:00Z"
 	a.scanImages()
+	if !strings.Contains(buf.String(), `msg="imagens: 2 de 3 no TNAS, 0,3 GB"`) {
+		t.Fatalf("sem o balanço das imagens: %s", buf)
+	}
 	if a.st.ImagesMsg != "" || a.st.Events[len(a.st.Events)-1].Msg != "todas as imagens estão no TNAS" {
 		t.Fatalf("não avisou que as imagens voltaram: %q", a.st.ImagesMsg)
 	}

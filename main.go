@@ -135,6 +135,7 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 		ui = cfg.UI.Listen
 	}
 	slog.Info("failover-agent a correr", "version", version, "mode", cfg.Mode, "ui", ui)
+	a.Preflight()
 	a.Run(ctx)
 
 	shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
