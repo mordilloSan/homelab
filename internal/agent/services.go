@@ -115,8 +115,13 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	}
 	var checked string // a checked override, waiting to be put in place
 	if yml != "" && (!existed || !sameOverride(paths.OverridesDir, before, yml) || strings.TrimSpace(req.Dir) != before.Dir) {
-		compose := filepath.Join(paths.MirrorSubvol, paths.MirrorRoot, strings.TrimSpace(req.Dir), "docker-compose.yml")
-		if !isRel(strings.TrimSpace(req.Dir)) || !fileExists(compose) {
+		dir := strings.TrimSpace(req.Dir)
+		if !isRel(dir) || strings.Contains(dir, "..") { // never above the mirror
+			fieldErr(w, "dir", "tem de ser uma pasta dentro do espelho")
+			return
+		}
+		compose := filepath.Join(paths.MirrorSubvol, paths.MirrorRoot, dir, "docker-compose.yml")
+		if !fileExists(compose) {
 			fieldErr(w, "dir", "não há docker-compose.yml nesta pasta do espelho")
 			return
 		}
@@ -166,6 +171,10 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
+		return
+	}
+	if strings.Contains(sv.Dir, "..") { // validate() already refused it; kept where the path is built
+		fieldErr(w, "dir", "tem de ser uma pasta dentro do espelho")
 		return
 	}
 	compose := filepath.Join(next.Paths.MirrorSubvol, next.Paths.MirrorRoot, sv.Dir, "docker-compose.yml")
