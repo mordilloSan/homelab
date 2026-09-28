@@ -1,0 +1,59 @@
+package agent
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"net"
+	"net/http"
+	"os"
+	"testing"
+	"time"
+)
+
+// On the UI's port, plain HTTP gets a redirect to HTTPS and TLS is served;
+// a client that connects and sends nothing does not hold the others up.
+func TestRedirectListener(t *testing.T) {
+	a, _ := setup(t)
+	cfg, err := a.TLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }),
+		ReadHeaderTimeout: time.Second}
+	go func() { _ = srv.Serve(NewRedirectListener(ln, cfg)) }()
+	defer srv.Close()
+	addr := ln.Addr().String()
+
+	idle, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idle.Close()
+
+	plain := &http.Client{Timeout: time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := plain.Get("http://" + addr + "/x?y=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "https://"+addr+"/x?y=1" {
+		t.Fatalf("HTTP %d, Location %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	pem, _ := os.ReadFile(CertFile(a.statePath))
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(pem)
+	sec := &http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+	resp, err = sec.Get("https://" + addr + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusTeapot {
+		t.Fatalf("HTTPS: %d", resp.StatusCode)
+	}
+}

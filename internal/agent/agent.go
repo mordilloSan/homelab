@@ -290,9 +290,11 @@ type Agent struct {
 	cfgPath    string
 	statePath  string
 	eventsPath string
-	evMu       sync.Mutex // guards events, apart from mu so the page can read them mid-tick
-	events     []Event    // oldest first
-	trimmedOn  string     // the day trimEvents last ran, as 2006-01-02
+	evMu       sync.Mutex                // guards events, apart from mu so the page can read them mid-tick
+	events     []Event                   // oldest first
+	trimmedOn  string                    // the day trimEvents last ran, as 2006-01-02
+	tnasIP     atomic.Pointer[string]    // for the certificate, read on handshakes without mu
+	certs      atomic.Pointer[certStore] // set when the UI serves TLS
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool
@@ -331,6 +333,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	}
 	a.events, a.st.Events = evs, nil
 	a.trimEvents()
+	a.tnasIP.Store(&cfg.TNASIP)
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
 	if err != nil {
