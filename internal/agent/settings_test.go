@@ -1,0 +1,114 @@
+package agent
+
+import (
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func postTo(t *testing.T, h http.HandlerFunc, body string) (int, string) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	return w.Code, w.Body.String()
+}
+
+// A section saves what it names, refuses a field of another section and,
+// for Rede and Caminhos, a change while a service is away from the server.
+func TestSectionRede(t *testing.T) {
+	a, _ := setup(t)
+	if code, body := postTo(t, a.postSection, `{"section":"rede","values":{"tnas_ip":"192.168.1.250"}}`); code != 204 {
+		t.Fatalf("HTTP %d: %s", code, body)
+	}
+	if c, _ := LoadConfig(a.cfgPath); a.cfg.TNASIP != "192.168.1.250" || c.TNASIP != "192.168.1.250" || *a.tnasIP.Load() != "192.168.1.250" {
+		t.Fatal("tnas_ip não aplicado, gravado ou passado ao certificado")
+	}
+	for body, field := range map[string]string{
+		`{"section":"rede","values":{"tnas_ip":"x"}}`:   "tnas_ip",
+		`{"section":"rede","values":{"dns.ttl":120}}`:   "dns.ttl",
+		`{"section":"rede","values":{"nope":1}}`:        "nope",
+		`{"section":"rede","values":{"server.ip":192}}`: "server.ip",
+	} {
+		code, got := postTo(t, a.postSection, body)
+		if code != 400 || !strings.Contains(got, `"field":"`+field+`"`) {
+			t.Errorf("%s: HTTP %d %s", body, code, got)
+		}
+	}
+	if a.cfg.TNASIP != "192.168.1.250" {
+		t.Fatal("um pedido recusado mudou a config")
+	}
+	a.st.Services["vaultwarden"] = &SvcState{State: Active}
+	if code, _ := postTo(t, a.postSection, `{"section":"rede","values":{"tnas_ip":"192.168.1.251"}}`); code != 409 {
+		t.Fatalf("mudou a rede com um serviço em failover: %d", code)
+	}
+	if code, _ := postTo(t, a.postSection, `{"section":"rede","values":{"tnas_ip":"192.168.1.250"}}`); code != 204 {
+		t.Fatalf("o mesmo valor foi recusado: %d", code)
+	}
+}
+
+// Secrets: empty keeps, a value replaces, and neither ever leaves the agent.
+func TestSectionSecrets(t *testing.T) {
+	a, _ := setup(t)
+	if code, _ := postTo(t, a.postSection, `{"section":"kuma","values":{"kuma.npm_token":""}}`); code != 204 || a.cfg.Kuma.NPMToken != "npmtok" {
+		t.Fatalf("vazio não manteve: %d %q", code, a.cfg.Kuma.NPMToken)
+	}
+	if code, _ := postTo(t, a.postSection, `{"section":"kuma","values":{"kuma.npm_token":" novo "}}`); code != 204 || a.cfg.Kuma.NPMToken != "novo" {
+		t.Fatalf("não substituiu: %d %q", code, a.cfg.Kuma.NPMToken)
+	}
+	if v := string(*a.view.Load()); strings.Contains(v, "novo") || !strings.Contains(v, `"kuma.npm_token":true`) {
+		t.Fatalf("o estado mostra o token ou não diz que existe: %s", v)
+	}
+}
+
+func TestSectionNumbersAndListen(t *testing.T) {
+	a, _ := setup(t)
+	if code, body := postTo(t, a.postSection, `{"section":"verificacao","values":{"start_timeout_min":"x"}}`); code != 400 || !strings.Contains(body, "start_timeout_min") {
+		t.Fatalf("texto num número: %d %s", code, body)
+	}
+	if code, _ := postTo(t, a.postSection, `{"section":"dns","values":{"dns.ttl":120}}`); code != 204 || a.cfg.DNS.TTL != 120 {
+		t.Fatalf("dns.ttl: %d %d", code, a.cfg.DNS.TTL)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if code, body := postTo(t, a.postSection, `{"section":"interface","values":{"ui.listen":"`+ln.Addr().String()+`"}}`); code != 400 || !strings.Contains(body, `"field":"ui.listen"`) {
+		t.Fatalf("aceitou uma porta ocupada: %d %s", code, body)
+	}
+}
+
+func TestSectionCheck(t *testing.T) {
+	a, _ := setup(t)
+	a.cfg.Paths.SnapshotsDir = filepath.Join(t.TempDir(), "nao-existe")
+	code, body := postTo(t, a.postCheck, `{"section":"caminhos"}`)
+	var res []checkResult
+	if err := json.Unmarshal([]byte(body), &res); code != 200 || err != nil {
+		t.Fatalf("HTTP %d %s", code, body)
+	}
+	for _, r := range res {
+		if r.Field == "paths.snapshots_dir" && !r.OK {
+			return
+		}
+	}
+	t.Fatalf("a pasta que falta não aparece: %s", body)
+}
+
+func TestRestart(t *testing.T) {
+	a, _ := setup(t)
+	done := make(chan struct{})
+	a.SetRestart(func() { close(done) })
+	if code, _ := postTo(t, a.postRestart, `{}`); code != 202 {
+		t.Fatalf("HTTP %d", code)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("não reiniciou")
+	}
+}

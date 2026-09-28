@@ -41,6 +41,9 @@ func (a *Agent) Handler() http.Handler {
 		_ = json.NewEncoder(w).Encode(a.eventsSnapshot())
 	})
 	mux.HandleFunc("POST /api/config", a.postConfig)
+	mux.HandleFunc("POST /api/config/section", a.postSection)
+	mux.HandleFunc("POST /api/config/check", a.postCheck)
+	mux.HandleFunc("POST /api/restart", a.postRestart)
 	mux.HandleFunc("POST /api/maintenance", a.postMaintenance)
 	mux.HandleFunc("POST /api/action", a.postAction)
 	mux.HandleFunc("POST /api/password", a.postPassword)
@@ -86,19 +89,6 @@ func UIURL(listen, host string, https bool) (string, error) {
 		scheme = "https://"
 	}
 	return scheme + net.JoinHostPort(h, port), nil
-}
-
-// UITLS serves the certificate in certFile/keyFile, read again on every
-// handshake so a renewed certificate is picked up without a restart.
-// ponytail: two file reads per handshake, fine for one admin's browser; cache by mtime if that ever shows.
-func UITLS(certFile, keyFile string) (*tls.Config, error) {
-	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
-		return nil, fmt.Errorf("certificado da interface: %w", err)
-	}
-	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		c, err := tls.LoadX509KeyPair(certFile, keyFile)
-		return &c, err
-	}}, nil
 }
 
 // Healthcheck asks the UI at listen for /healthz, on loopback when it listens

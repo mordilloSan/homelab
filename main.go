@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -63,7 +62,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "run":
 		err = serve(ctx, *cfgPath, *statePath)
 	case "healthcheck":
-		err = healthcheck(*cfgPath)
+		err = healthcheck(*cfgPath, *statePath)
 	case "version":
 		fmt.Fprintln(stdout, version)
 	case "help":
@@ -88,12 +87,12 @@ func writeUsage(w io.Writer) {
   version      mostra a versão`)
 }
 
-func healthcheck(cfgPath string) error {
+func healthcheck(cfgPath, statePath string) error {
 	cfg, err := agent.LoadConfig(cfgPath)
 	if err != nil {
 		return err
 	}
-	return agent.Healthcheck(cfg.UI.Listen, cfg.UI.TLSCert)
+	return agent.Healthcheck(cfg.UI.Listen, agent.CertFile(statePath))
 }
 
 // serve runs the agent until ctx ends. A signal stops it between ticks, never
@@ -120,17 +119,16 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	if err != nil {
 		return fmt.Errorf("interface: %w", err)
 	}
-	https := cfg.UI.TLSCert != ""
 	srv := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	if https {
-		if srv.TLSConfig, err = agent.UITLS(cfg.UI.TLSCert, cfg.UI.TLSKey); err != nil {
-			_ = ln.Close()
-			return err
-		}
-		ln = tls.NewListener(ln, srv.TLSConfig)
+	if srv.TLSConfig, err = a.TLSConfig(); err != nil {
+		_ = ln.Close()
+		return err
 	}
+	ln = agent.NewRedirectListener(ln, srv.TLSConfig) // HTTPS, and http:// on the same port redirects
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	a.SetListening(cfg.UI.Listen)
+	a.SetRestart(cancel) // the UI's restart: Run returns, the process exits 0 and Docker starts it again
 	serveErr := make(chan error, 1)
 	go func() {
 		if serr := srv.Serve(ln); !errors.Is(serr, http.ErrServerClosed) {
@@ -139,7 +137,7 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 		}
 	}()
 
-	ui, err := agent.UIURL(cfg.UI.Listen, cfg.TNASIP, https)
+	ui, err := agent.UIURL(cfg.UI.Listen, cfg.TNASIP, true)
 	if err != nil {
 		ui = cfg.UI.Listen
 	}
