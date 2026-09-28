@@ -3,12 +3,14 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -78,35 +80,80 @@ type Config struct {
 		PrepullAt string `yaml:"prepull_at"`
 	} `yaml:"nightly"`
 	UI struct {
-		Listen  string `yaml:"listen"`   // the login is in user.yml, next to this file
-		TLSCert string `yaml:"tls_cert"` // PEM; with tls_key the UI is HTTPS, without both HTTP
-		TLSKey  string `yaml:"tls_key"`
+		Listen string `yaml:"listen"` // the login is in user.yml, next to this file
+		// ignored: the UI makes its own certificate; read only so older files still load
+		TLSCert string `yaml:"tls_cert,omitempty"`
+		TLSKey  string `yaml:"tls_key,omitempty"`
 	} `yaml:"ui"`
 }
 
 // Service names end up in compose project names and snapshot paths.
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// FieldError is a validation error of one key of failover.yml, so the UI can
+// show it next to that field.
+type FieldError struct{ Field, Msg string }
+
+func (e *FieldError) Error() string { return e.Field + ": " + e.Msg }
+
+func fe(field, msg string) error { return &FieldError{field, msg} }
+
+func isIP(s string) bool { return net.ParseIP(s) != nil }
+
+// isName is a host or zone name: no scheme, port, path or spaces.
+func isName(s string) bool { return s != "" && !strings.ContainsAny(s, " /:\t") }
+
+func isURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// isRel is a folder inside another one: relative and never above it.
+func isRel(s string) bool {
+	c := filepath.Clean(s)
+	return s != "" && !filepath.IsAbs(s) && c != ".." && !strings.HasPrefix(c, "../")
+}
+
+func isListen(s string) bool {
+	_, port, err := net.SplitHostPort(s)
+	n, perr := strconv.Atoi(port)
+	return err == nil && perr == nil && n >= 1 && n <= 65535
+}
+
 func (c *Config) validate() error {
-	switch {
-	case c.Mode != "observe" && c.Mode != "auto":
-		return errors.New("mode tem de ser observe ou auto")
-	case c.CheckIntervalS < 10:
-		return errors.New("check_interval_s tem de ser >= 10")
-	case c.StartTimeoutMin < 1 || c.NPM.AlertAfterMin < 0:
-		return errors.New("start_timeout_min tem de ser >= 1 e npm.alert_after_min >= 0")
-	case c.Server.IP == "" || c.Server.NPMCheckHost == "" || c.TNASIP == "" || c.RouterIP == "":
-		return errors.New("server.ip, server.npm_check_host, tnas_ip e router_ip são obrigatórios")
-	case c.Paths.MirrorSubvol == "" || c.Paths.SnapshotsDir == "" || c.NPM.Dir == "":
-		return errors.New("paths.mirror_subvol, paths.snapshots_dir e npm.dir são obrigatórios")
-	case c.DNS.APIURL == "" || c.DNS.TokenFile == "" || c.DNS.Zone == "":
-		return errors.New("dns.api_url, dns.token_file e dns.zone são obrigatórios")
-	case (c.UI.TLSCert == "") != (c.UI.TLSKey == ""):
-		return errors.New("ui.tls_cert e ui.tls_key vão juntos")
+	for _, r := range []struct {
+		bad        bool
+		field, msg string
+	}{
+		{c.Mode != "observe" && c.Mode != "auto", "mode", "tem de ser observe ou auto"},
+		{c.CheckIntervalS < 10, "check_interval_s", "tem de ser pelo menos 10"},
+		{c.StartTimeoutMin < 1, "start_timeout_min", "tem de ser pelo menos 1"},
+		{c.NPM.AlertAfterMin < 0, "npm.alert_after_min", "não pode ser negativo"},
+		{c.Maintenance.DefaultExpiryMin < 1 || c.Maintenance.DefaultExpiryMin > 7*24*60, "maintenance.default_expiry_min", "tem de estar entre 1 e 10080"},
+		{!isIP(c.Server.IP), "server.ip", "tem de ser um endereço IP"},
+		{!isName(c.Server.NPMCheckHost), "server.npm_check_host", "tem de ser um nome, sem https:// nem /"},
+		{!isIP(c.TNASIP), "tnas_ip", "tem de ser um endereço IP"},
+		{!isIP(c.RouterIP), "router_ip", "tem de ser um endereço IP"},
+		{strings.ContainsAny(c.LANIface, " /\t"), "lan_iface", "tem de ser o nome de uma interface, sem espaços"},
+		{!filepath.IsAbs(c.Paths.MirrorSubvol), "paths.mirror_subvol", "tem de ser um caminho absoluto"},
+		{c.Paths.MirrorRoot != "" && !isRel(c.Paths.MirrorRoot), "paths.mirror_root", "tem de ser uma pasta dentro do espelho"},
+		{!filepath.IsAbs(c.Paths.SnapshotsDir), "paths.snapshots_dir", "tem de ser um caminho absoluto"},
+		{c.Paths.OverridesDir != "" && !filepath.IsAbs(c.Paths.OverridesDir), "paths.overrides_dir", "tem de ser um caminho absoluto"},
+		{!isRel(c.NPM.Dir), "npm.dir", "tem de ser uma pasta dentro do espelho"},
+		{!isURL(c.DNS.APIURL), "dns.api_url", "tem de começar por http:// ou https://"},
+		{c.DNS.TokenFile == "", "dns.token_file", "é obrigatório"},
+		{!isName(c.DNS.Zone), "dns.zone", "tem de ser um nome, sem espaços"},
+		{c.DNS.TTL < 1 || c.DNS.TTL > 86400, "dns.ttl", "tem de estar entre 1 e 86400 segundos"},
+		{c.Kuma.BaseURL != "" && !isURL(c.Kuma.BaseURL), "kuma.base_url", "tem de começar por http:// ou https://"},
+		{!isListen(c.UI.Listen), "ui.listen", "tem de ser endereço:porta, por exemplo 0.0.0.0:8099"},
+	} {
+		if r.bad {
+			return fe(r.field, r.msg)
+		}
 	}
 	if at := c.Nightly.PrepullAt; at != "" {
 		if _, err := time.Parse("15:04", at); err != nil || len(at) != 5 {
-			return errors.New("nightly.prepull_at tem de ser HH:MM")
+			return fe("nightly.prepull_at", "tem de ser HH:MM")
 		}
 	}
 	seen := map[string]bool{"npm": true}
@@ -142,10 +189,12 @@ func LoadConfig(path string) (Config, error) {
 	if err := d.Decode(&c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
+	c.Maintenance.DefaultExpiryMin = cmp.Or(c.Maintenance.DefaultExpiryMin, 60)
 	if err := c.validate(); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
 	c.DNS.Enabled = nil // gone from the file on the next save
+	c.UI.TLSCert, c.UI.TLSKey = "", ""
 	return c, nil
 }
 

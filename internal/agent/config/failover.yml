@@ -71,5 +71,3 @@ nightly:
 
 ui:
   listen: 0.0.0.0:8099                 # entra com admin / admin e muda a password na interface
-  tls_cert: ""                         # PEM (fullchain) e chave: os dois dão HTTPS, vazios HTTP
-  tls_key: ""                          # relidos a cada ligação, a renovação não pede reinício
