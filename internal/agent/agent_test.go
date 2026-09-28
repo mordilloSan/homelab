@@ -187,7 +187,7 @@ func hasGet(f *fake, sub string) bool {
 }
 
 func hasEvent(a *Agent, sub string) bool {
-	return slices.ContainsFunc(a.st.Events, func(e Event) bool { return strings.Contains(e.Msg, sub) })
+	return slices.ContainsFunc(a.events, func(e Event) bool { return strings.Contains(e.Msg, sub) })
 }
 
 // A signal (ctx) stops Run after the tick, never in the middle of it.
@@ -261,7 +261,7 @@ func TestReturnLeftovers(t *testing.T) {
 	for _, want := range []string{"containers e volumes de failover-vaultwarden removidos", "snapshot " + filepath.Base(snap) + " apagado",
 		"containers e volumes de failover-npm removidos", "NPM do TNAS parado"} {
 		if !hasEvent(a, want) {
-			t.Errorf("sem o evento %q: %v", want, a.st.Events)
+			t.Errorf("sem o evento %q: %v", want, a.events)
 		}
 	}
 }
@@ -304,7 +304,7 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 		t.Fatalf("DNS não mudou: %v", f.gets)
 	}
 	if !hasEvent(a, "DNS: bitwarden.engmariz.com → "+tnas) {
-		t.Fatalf("sem evento do DNS: %v", a.st.Events)
+		t.Fatalf("sem evento do DNS: %v", a.events)
 	}
 	if !hasGet(f, "/api/push/vwtok?msg=em+failover+no+TNAS&status=down") {
 		t.Fatalf("Kuma não recebeu o down: %v", f.gets)
@@ -325,7 +325,7 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 		t.Fatalf("R1 violado: %v", f.cmds)
 	}
 	if !hasEvent(a, "DNS: bitwarden.engmariz.com de volta ao servidor") {
-		t.Fatalf("sem evento do regresso do DNS: %v", a.st.Events)
+		t.Fatalf("sem evento do regresso do DNS: %v", a.events)
 	}
 	if f.ran("docker compose -p failover-npm down -v") < del || f.ran("btrfs subvolume delete "+npmSnap) < 0 {
 		t.Fatalf("NPM do TNAS não parou: %v", f.cmds)
@@ -477,7 +477,7 @@ func TestObserveMode(t *testing.T) {
 		t.Fatalf("agiu em observação: %v", f.cmds)
 	}
 	n := 0
-	for _, e := range a.st.Events {
+	for _, e := range a.events {
 		if strings.HasPrefix(e.Msg, "[observação]") {
 			n++
 		}
@@ -553,7 +553,7 @@ func TestScanImages(t *testing.T) {
 	if !strings.Contains(buf.String(), `msg="imagens: 2 de 3 no TNAS, 0,3 GB"`) {
 		t.Fatalf("sem o balanço das imagens: %s", buf)
 	}
-	if a.st.ImagesMsg != "" || a.st.Events[len(a.st.Events)-1].Msg != "todas as imagens estão no TNAS" {
+	if a.st.ImagesMsg != "" || a.events[len(a.events)-1].Msg != "todas as imagens estão no TNAS" {
 		t.Fatalf("não avisou que as imagens voltaram: %q", a.st.ImagesMsg)
 	}
 }
@@ -588,7 +588,7 @@ func TestInternetPerBox(t *testing.T) {
 	f.noNet = map[string]bool{a.cfg.Server.IP: true}
 	a.Tick(t0)
 	if a.st.ServerNetOK || !a.st.TNASNetOK || !hasEvent(a, "servidor: sem internet, o DNS não resolve nomes de fora") {
-		t.Fatalf("servidor sem internet: %v %v %v", a.st.ServerNetOK, a.st.TNASNetOK, a.st.Events)
+		t.Fatalf("servidor sem internet: %v %v %v", a.st.ServerNetOK, a.st.TNASNetOK, a.events)
 	}
 	f.noNet = map[string]bool{}
 	f.noPing[a.cfg.Server.IP] = true

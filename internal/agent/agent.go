@@ -3,7 +3,6 @@ package agent
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -217,10 +216,8 @@ type State struct {
 	ImagesAt   time.Time            `json:"images_at,omitzero"`
 	ImagesMsg  string               `json:"images_msg,omitempty"`
 	Services   map[string]*SvcState `json:"services"`
-	Events     []Event              `json:"events"`
+	Events     []Event              `json:"events,omitempty"` // only read: moved to events.jsonl on start
 }
-
-const maxEvents = 200
 
 // System is every side effect the agent has, so tests can replace it.
 type System interface {
@@ -236,23 +233,27 @@ type Agent struct {
 	// outside it; the actions (compose up/down, btrfs) run inside, so a UI
 	// write waits only while a failover or a return is being carried out.
 	// Reads use view and never wait.
-	mu        sync.Mutex
-	cfg       Config
-	st        State
-	sys       System
-	now       time.Time // time of the operation in progress
-	cfgPath   string
-	statePath string
-	wake      chan struct{}
-	view      atomic.Pointer[[]byte]
-	pulling   atomic.Bool
-	scanning  atomic.Bool
-	pushErr   string
-	beats     map[string][]Beat
-	tnasSeen  bool // last TNAS ping, so a change is logged once
-	userPath  string
-	creds     atomic.Pointer[creds] // read by every request, so outside mu
-	sessions  sessions
+	mu         sync.Mutex
+	cfg        Config
+	st         State
+	sys        System
+	now        time.Time // time of the operation in progress
+	cfgPath    string
+	statePath  string
+	eventsPath string
+	evMu       sync.Mutex // guards events, apart from mu so the page can read them mid-tick
+	events     []Event    // oldest first
+	trimmedOn  string     // the day trimEvents last ran, as 2006-01-02
+	wake       chan struct{}
+	view       atomic.Pointer[[]byte]
+	pulling    atomic.Bool
+	scanning   atomic.Bool
+	pushErr    string
+	beats      map[string][]Beat
+	tnasSeen   bool // last TNAS ping, so a change is logged once
+	userPath   string
+	creds      atomic.Pointer[creds] // read by every request, so outside mu
+	sessions   sessions
 }
 
 func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error) {
@@ -271,6 +272,16 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	if a.st.Services == nil {
 		a.st.Services = map[string]*SvcState{}
 	}
+	a.eventsPath = eventsPath(statePath)
+	evs, err := loadEvents(a.eventsPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		evs = a.st.Events // from before events.jsonl
+	case err != nil:
+		return nil, err
+	}
+	a.events, a.st.Events = evs, nil
+	a.trimEvents()
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
 	if err != nil {
@@ -320,6 +331,9 @@ func (a *Agent) Tick(now time.Time) {
 	a.stopIdleNPM()
 	a.report()
 	a.nightly()
+	if a.now.Format(time.DateOnly) != a.trimmedOn {
+		a.trimEvents()
+	}
 	a.save()
 }
 
@@ -340,14 +354,6 @@ func (a *Agent) service(name string) (Service, bool) {
 		return Service{}, false
 	}
 	return a.cfg.Services[i], true
-}
-
-func (a *Agent) event(svc, msg string) {
-	slog.Info(msg, "svc", cmp.Or(svc, "global"))
-	a.st.Events = append(a.st.Events, Event{T: a.now, Svc: svc, Msg: msg})
-	if n := len(a.st.Events); n > maxEvents {
-		a.st.Events = slices.Clone(a.st.Events[n-maxEvents:])
-	}
 }
 
 // warn records a repeating problem once, not every tick.
@@ -1091,6 +1097,9 @@ func (a *Agent) publish() {
 	for _, sv := range a.cfg.Services {
 		svcs = append(svcs, svcView{sv, a.svc(sv.Name)})
 	}
+	a.evMu.Lock()
+	recent := slices.Clone(a.events[max(0, len(a.events)-statusEvents):])
+	a.evMu.Unlock()
 	// A struct, not a map: omitzero only works on fields, and a zero time
 	// sent as "0001-01-01" reads as a date in the page.
 	b, _ := json.Marshal(struct {
@@ -1131,7 +1140,7 @@ func (a *Agent) publish() {
 		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
-		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, a.st.Events,
+		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 	})
 	a.view.Store(&b)
 }
