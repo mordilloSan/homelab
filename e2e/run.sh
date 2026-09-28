@@ -28,9 +28,11 @@ cleanup() {
 	rm -rf "$W"
 }
 
-# the UI logs in with a form and a session cookie; a restarted agent forgets the session
-login() { curl -sf -o /dev/null -c "$W/cookies" -d username=admin -d "password=$pw" http://127.0.0.1:18099/login; }
-status() { curl -sf -b "$W/cookies" http://127.0.0.1:18099/api/status || { login && curl -sf -b "$W/cookies" http://127.0.0.1:18099/api/status; }; }
+# the UI logs in with a form and a session cookie; a restarted agent forgets the session.
+# It is HTTPS with the agent's own self-signed certificate, hence -k.
+ui=https://127.0.0.1:18099
+login() { curl -sfk -o /dev/null -c "$W/cookies" -d username=admin -d "password=$pw" "$ui/login"; }
+status() { curl -sfk -b "$W/cookies" "$ui/api/status" || { login && curl -sfk -b "$W/cookies" "$ui/api/status"; }; }
 
 # wait_for <jq condition> <timeout s> <description>
 wait_for() {
@@ -170,7 +172,7 @@ ui: {listen: "127.0.0.1:18099"}
 EOF
 
 run_agent() {
-	docker run -d --name e2e-agent --network host --privileged \
+	docker run -d --name e2e-agent --network host --privileged --restart unless-stopped \
 		-v /var/run/docker.sock:/var/run/docker.sock -v "$W:$W" \
 		-v "$W/btrfs:/usr/local/bin/btrfs:ro" -e TZ=Europe/Lisbon \
 		"$image" -config "$W/config/failover.yml" -state "$W/state/state.json" >/dev/null
@@ -185,7 +187,7 @@ if [[ $cmd == start ]]; then
 	wait_for '.router_ok' 60 "interface a responder"
 	cat <<EOF
 
-Interface: http://localhost:18099  (admin / $pw)
+Interface: https://localhost:18099  (admin / $pw; o browser avisa do certificado próprio)
 Começa em observação: muda para automático na interface para ver o failover a sério.
 make server-down / make server-up simula a falha do servidor · make logs · make stop
 EOF
@@ -193,6 +195,15 @@ EOF
 fi
 
 wait_for '.services[0].state == "NORMAL" and .services[0].server_ok and .server_npm_ok' 40 "servidor saudável, nada a fazer"
+if [[ $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:18099/x) != "301 https://127.0.0.1:18099/x" ]]; then
+	echo "FALHOU: http:// na porta da interface não redireciona para https://"
+	exit 1
+fi
+if ! docker exec e2e-agent failover-agent healthcheck -config "$W/config/failover.yml" -state "$W/state/state.json"; then
+	echo "FALHOU: o healthcheck não confia no certificado da interface"
+	exit 1
+fi
+echo "ok: interface em HTTPS, http:// redireciona e o healthcheck confia no certificado"
 # the ml image is never on disk: listing it would mean the override was ignored
 wait_for '(.images.web.images | length == 1 and .[0].ref == "caddy:alpine" and .[0].present and .[0].size > 0) and .images.npm.images[0].present' 60 \
 	"imagens de cada stack verificadas no TNAS, com o override aplicado (O4)"
