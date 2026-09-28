@@ -288,7 +288,8 @@ type State struct {
 	ImagesAt   time.Time            `json:"images_at,omitzero"`
 	ImagesMsg  string               `json:"images_msg,omitempty"`
 	Services   map[string]*SvcState `json:"services"`
-	Events     []Event              `json:"events,omitempty"` // only read: moved to events.jsonl on start
+	Events     []Event              `json:"events,omitempty"`     // only read: moved to events.jsonl on start
+	SetupDone  bool                 `json:"setup_done,omitempty"` // the first-start guide was finished (or the install predates it)
 }
 
 // System is every side effect the agent has, so tests can replace it.
@@ -346,6 +347,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 		if err = json.Unmarshal(b, &a.st); err != nil {
 			return nil, fmt.Errorf("estado %s corrompido: %w", statePath, err)
 		}
+		a.st.SetupDone = true // a state already there: an install in use, which needs no guide
 	case !errors.Is(err, fs.ErrNotExist):
 		return nil, err
 	}
@@ -1244,6 +1246,7 @@ func (a *Agent) publish() {
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
 		Settings         any       `json:"settings"`
+		SetupPending     bool      `json:"setup_pending"`
 		UIListenRunning  string    `json:"ui_listen_running"`
 		Cert             any       `json:"cert"`
 	}{
@@ -1251,7 +1254,7 @@ func (a *Agent) publish() {
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
-		settingsView(&a.cfg), a.listening, certView{names, notAfter},
+		settingsView(&a.cfg), !a.st.SetupDone, a.listening, certView{names, notAfter},
 	})
 	a.view.Store(&b)
 }

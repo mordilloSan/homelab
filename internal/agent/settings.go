@@ -253,6 +253,15 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// postSetupDone records that the first-start guide was finished.
+func (a *Agent) postSetupDone(w http.ResponseWriter, _ *http.Request) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.st.SetupDone = true
+	a.now = time.Now()
+	a.done(w, "", "configuração inicial concluída")
+}
+
 // SetRestart is how the UI ends the agent so Docker starts it again.
 func (a *Agent) SetRestart(f func()) { a.mu.Lock(); a.restart = f; a.mu.Unlock() }
 
