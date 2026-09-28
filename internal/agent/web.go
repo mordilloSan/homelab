@@ -32,6 +32,10 @@ func (a *Agent) Handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(*a.view.Load())
 	})
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(a.eventsSnapshot())
+	})
 	mux.HandleFunc("POST /api/config", a.postConfig)
 	mux.HandleFunc("POST /api/maintenance", a.postMaintenance)
 	mux.HandleFunc("POST /api/action", a.postAction)
@@ -133,14 +137,15 @@ func (a *Agent) done(w http.ResponseWriter, svc, msg string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// postConfig applies what the request names and leaves the rest as it is.
 func (a *Agent) postConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Mode           string `json:"mode"`
-		CheckIntervalS int    `json:"check_interval_s"`
+		Mode           *string `json:"mode"`
+		CheckIntervalS *int    `json:"check_interval_s"`
 		Services       []struct {
 			Name         string `json:"name"`
-			WaitMin      int    `json:"wait_min"`
-			StabilityMin int    `json:"stability_min"`
+			WaitMin      *int   `json:"wait_min"`
+			StabilityMin *int   `json:"stability_min"`
 		} `json:"services"`
 	}
 	if !decode(w, r, &req) {
@@ -150,14 +155,24 @@ func (a *Agent) postConfig(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	next := a.cfg
 	next.Services = slices.Clone(a.cfg.Services)
-	next.Mode, next.CheckIntervalS = req.Mode, req.CheckIntervalS
+	if req.Mode != nil {
+		next.Mode = *req.Mode
+	}
+	if req.CheckIntervalS != nil {
+		next.CheckIntervalS = *req.CheckIntervalS
+	}
 	for _, rs := range req.Services {
 		i := slices.IndexFunc(next.Services, func(s Service) bool { return s.Name == rs.Name })
 		if i < 0 {
 			http.Error(w, "serviço desconhecido: "+rs.Name, http.StatusBadRequest)
 			return
 		}
-		next.Services[i].WaitMin, next.Services[i].StabilityMin = rs.WaitMin, rs.StabilityMin
+		if rs.WaitMin != nil {
+			next.Services[i].WaitMin = *rs.WaitMin
+		}
+		if rs.StabilityMin != nil {
+			next.Services[i].StabilityMin = *rs.StabilityMin
+		}
 	}
 	if err := next.validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

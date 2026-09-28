@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -55,7 +56,7 @@ func TestUI(t *testing.T) {
 	}
 
 	anon, me, other := browser(), browser(), browser()
-	if do(anon, "", "/", "") != http.StatusSeeOther || do(anon, "", "/api/status", "") != 401 || do(anon, "", "/login", "") != 200 {
+	if do(anon, "", "/", "") != http.StatusSeeOther || do(anon, "", "/api/status", "") != 401 || do(anon, "", "/api/events", "") != 401 || do(anon, "", "/login", "") != 200 {
 		t.Fatal("sem sessão: a página tem de ir para o login e a API responder 401")
 	}
 	for _, bad := range [][2]string{{"admin", "errada"}, {"outro", "admin"}} {
@@ -77,6 +78,7 @@ func TestUI(t *testing.T) {
 		want              int
 	}{
 		{"", "/api/status", "", 200},
+		{"", "/api/events", "", 200},
 		{"text/plain", "/api/config", cfg, 415},
 		{js, "/api/config", `{"mode":"auto","check_interval_s":5}`, 400},
 		{js, "/api/config", cfg, 204},
@@ -222,4 +224,54 @@ func TestUIURL(t *testing.T) {
 	if got, _ := UIURL(":8099", "192.168.1.249", true); got != "https://192.168.1.249:8099" {
 		t.Errorf("com TLS: %s", got)
 	}
+}
+
+// A partial config changes only what it names.
+func TestConfigPartial(t *testing.T) {
+	a, _ := setup(t)
+	post := func(body string) int {
+		t.Helper()
+		w := httptest.NewRecorder()
+		a.postConfig(w, httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(body)))
+		return w.Code
+	}
+	iv, hp := a.cfg.CheckIntervalS, a.cfg.Services[1]
+	if post(`{"mode":"observe"}`) != 204 || a.cfg.Mode != "observe" || a.cfg.CheckIntervalS != iv {
+		t.Fatalf("só o modo: %s %d", a.cfg.Mode, a.cfg.CheckIntervalS)
+	}
+	if post(`{"services":[{"name":"vaultwarden","stability_min":7}]}`) != 204 {
+		t.Fatal("só a estabilidade de um serviço foi recusada")
+	}
+	vw, _ := a.service("vaultwarden")
+	if vw.StabilityMin != 7 || vw.WaitMin == 0 || a.cfg.Services[1] != hp || a.cfg.Mode != "observe" {
+		t.Fatalf("mexeu no que não devia: %+v %+v", vw, a.cfg.Services[1])
+	}
+	if post(`{"services":[{"name":"vaultwarden","wait_min":0}]}`) != 400 {
+		t.Fatal("aceitou espera 0")
+	}
+	if post(`{"services":[{"name":"nao-existe","wait_min":3}]}`) != 400 {
+		t.Fatal("aceitou um serviço desconhecido")
+	}
+	if c, _ := LoadConfig(a.cfgPath); c.Mode != "observe" {
+		t.Fatal("não gravou")
+	}
+}
+
+// /api/events has every event, newest first.
+func TestEventsAPI(t *testing.T) {
+	a, _ := setup(t)
+	a.event("", "primeiro")
+	a.event("", "segundo")
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, withSession(a, httptest.NewRequest(http.MethodGet, "/api/events", nil)))
+	var evs []Event
+	if err := json.Unmarshal(w.Body.Bytes(), &evs); err != nil || len(evs) < 2 || evs[0].Msg != "segundo" {
+		t.Fatalf("HTTP %d: %s", w.Code, w.Body)
+	}
+}
+
+// withSession adds a live session cookie to r.
+func withSession(a *Agent, r *http.Request) *http.Request {
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: a.sessions.create()})
+	return r
 }
