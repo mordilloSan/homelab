@@ -1,6 +1,14 @@
 package agent
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -55,7 +63,7 @@ func TestUI(t *testing.T) {
 	}
 
 	anon, me, other := browser(), browser(), browser()
-	if do(anon, "", "/", "") != http.StatusSeeOther || do(anon, "", "/api/status", "") != 401 || do(anon, "", "/login", "") != 200 {
+	if do(anon, "", "/", "") != http.StatusSeeOther || do(anon, "", "/api/status", "") != 401 || do(anon, "", "/api/events", "") != 401 || do(anon, "", "/login", "") != 200 {
 		t.Fatal("sem sessão: a página tem de ir para o login e a API responder 401")
 	}
 	for _, bad := range [][2]string{{"admin", "errada"}, {"outro", "admin"}} {
@@ -77,6 +85,7 @@ func TestUI(t *testing.T) {
 		want              int
 	}{
 		{"", "/api/status", "", 200},
+		{"", "/api/events", "", 200},
 		{"text/plain", "/api/config", cfg, 415},
 		{js, "/api/config", `{"mode":"auto","check_interval_s":5}`, 400},
 		{js, "/api/config", cfg, 204},
@@ -121,9 +130,8 @@ func TestUI(t *testing.T) {
 	}
 }
 
-// The DNS settings in the UI: the token is tested before it is saved, and DNS
-// cannot be turned off while a service is pointed to the TNAS.
-func TestDNSSettings(t *testing.T) {
+// The Technitium token in the UI is tested before it is saved.
+func TestDNSToken(t *testing.T) {
 	a, f := setup(t)
 	post := func(body string) int {
 		t.Helper()
@@ -131,31 +139,19 @@ func TestDNSSettings(t *testing.T) {
 		a.postDNS(w, httptest.NewRequest(http.MethodPost, "/api/dns", strings.NewReader(body)))
 		return w.Code
 	}
-	saved := func() bool {
-		t.Helper()
-		c, err := LoadConfig(a.cfgPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c.DNS.Enabled
-	}
 	tokFile := a.cfg.DNS.TokenFile
-
-	if post(`{"enabled":false}`) != 204 || a.cfg.DNS.Enabled || saved() {
-		t.Fatal("desligar não ficou aplicado e gravado")
-	}
 	if err := os.Remove(tokFile); err != nil {
 		t.Fatal(err)
 	}
-	if post(`{"enabled":true}`) != 400 || a.cfg.DNS.Enabled {
-		t.Fatal("ligou sem token")
+	if post(`{"token":" "}`) != 400 {
+		t.Fatal("aceitou um token vazio")
 	}
 	f.badToken = "errado"
-	if post(`{"enabled":true,"token":"errado"}`) != 400 || a.cfg.DNS.Enabled || fileExists(tokFile) {
-		t.Fatal("token recusado pelo Technitium mas gravado ou DNS ligado")
+	if post(`{"token":"errado"}`) != 400 || fileExists(tokFile) {
+		t.Fatal("token recusado pelo Technitium mas gravado")
 	}
-	if post(`{"enabled":true,"token":" novo "}`) != 204 || !a.cfg.DNS.Enabled || !saved() || !hasGet(f, "records/get?") {
-		t.Fatalf("token bom: DNS não ligado ou não testado: %v", f.gets)
+	if post(`{"token":" novo "}`) != 204 || !hasGet(f, "records/get?") {
+		t.Fatalf("token bom: não gravado ou não testado: %v", f.gets)
 	}
 	if b, _ := os.ReadFile(tokFile); string(b) != "novo\n" {
 		t.Fatalf("token gravado: %q", b)
@@ -165,11 +161,6 @@ func TestDNSSettings(t *testing.T) {
 	}
 	if v := string(*a.view.Load()); !strings.Contains(v, `"dns_token":true`) || strings.Contains(v, "novo") {
 		t.Fatalf("o estado tem de dizer que há token, sem o mostrar: %s", v)
-	}
-
-	a.st.Services["vaultwarden"] = &SvcState{State: Active, DNS: true}
-	if post(`{"enabled":false}`) != 409 || !a.cfg.DNS.Enabled {
-		t.Fatal("desligou o DNS com um serviço apontado para o TNAS")
 	}
 }
 
@@ -210,13 +201,55 @@ func TestHealthcheck(t *testing.T) {
 	srv := httptest.NewServer(a.Handler())
 	defer srv.Close()
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	if err := Healthcheck("0.0.0.0:" + port); err != nil {
+	if err := Healthcheck("0.0.0.0:"+port, ""); err != nil {
 		t.Fatal(err)
 	}
 	srv.Close()
-	if Healthcheck("0.0.0.0:"+port) == nil {
+	if Healthcheck("0.0.0.0:"+port, "") == nil {
 		t.Fatal("healthcheck ok com a interface em baixo")
 	}
+
+	// HTTPS: it trusts only the UI's own certificate, never any certificate.
+	dir := t.TempDir()
+	for _, c := range []struct {
+		name  string
+		names []string
+	}{{"nome", []string{"failover.lan"}}, {"wildcard", []string{"*.engmariz.com"}}} {
+		cert, certFile := testCert(t, dir, c.name, c.names)
+		tsrv := httptest.NewUnstartedServer(a.Handler())
+		tsrv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+		tsrv.StartTLS()
+		_, port, _ = net.SplitHostPort(tsrv.Listener.Addr().String())
+		if err := Healthcheck("0.0.0.0:"+port, certFile); err != nil {
+			t.Errorf("%s: healthcheck em HTTPS: %v", c.name, err)
+		}
+		_, other := testCert(t, dir, c.name+"-outro", c.names)
+		if Healthcheck("0.0.0.0:"+port, other) == nil {
+			t.Errorf("%s: healthcheck ok com um certificado que não é o da interface", c.name)
+		}
+		tsrv.Close()
+	}
+}
+
+// testCert makes a self-signed certificate for names and writes its PEM to dir.
+func testCert(t *testing.T, dir, file string, names []string) (tls.Certificate, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), DNSNames: names,
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, file+".pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, path
 }
 
 // The address in the startup log: the TNAS IP instead of 0.0.0.0.
@@ -227,8 +260,61 @@ func TestUIURL(t *testing.T) {
 		"[::]:8099":         "http://192.168.1.249:8099",
 		"192.168.1.10:8099": "http://192.168.1.10:8099",
 	} {
-		if got, _ := UIURL(listen, "192.168.1.249"); got != want {
+		if got, _ := UIURL(listen, "192.168.1.249", false); got != want {
 			t.Errorf("%s: %s, queria %s", listen, got, want)
 		}
 	}
+	if got, _ := UIURL(":8099", "192.168.1.249", true); got != "https://192.168.1.249:8099" {
+		t.Errorf("com TLS: %s", got)
+	}
+}
+
+// A partial config changes only what it names.
+func TestConfigPartial(t *testing.T) {
+	a, _ := setup(t)
+	post := func(body string) int {
+		t.Helper()
+		w := httptest.NewRecorder()
+		a.postConfig(w, httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(body)))
+		return w.Code
+	}
+	iv, hp := a.cfg.CheckIntervalS, a.cfg.Services[1]
+	if post(`{"mode":"observe"}`) != 204 || a.cfg.Mode != "observe" || a.cfg.CheckIntervalS != iv {
+		t.Fatalf("só o modo: %s %d", a.cfg.Mode, a.cfg.CheckIntervalS)
+	}
+	if post(`{"services":[{"name":"vaultwarden","stability_min":7}]}`) != 204 {
+		t.Fatal("só a estabilidade de um serviço foi recusada")
+	}
+	vw, _ := a.service("vaultwarden")
+	if vw.StabilityMin != 7 || vw.WaitMin == 0 || a.cfg.Services[1] != hp || a.cfg.Mode != "observe" {
+		t.Fatalf("mexeu no que não devia: %+v %+v", vw, a.cfg.Services[1])
+	}
+	if post(`{"services":[{"name":"vaultwarden","wait_min":0}]}`) != 400 {
+		t.Fatal("aceitou espera 0")
+	}
+	if post(`{"services":[{"name":"nao-existe","wait_min":3}]}`) != 400 {
+		t.Fatal("aceitou um serviço desconhecido")
+	}
+	if c, _ := LoadConfig(a.cfgPath); c.Mode != "observe" {
+		t.Fatal("não gravou")
+	}
+}
+
+// /api/events has every event, newest first.
+func TestEventsAPI(t *testing.T) {
+	a, _ := setup(t)
+	a.event("", "primeiro")
+	a.event("", "segundo")
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, withSession(a, httptest.NewRequest(http.MethodGet, "/api/events", nil)))
+	var evs []Event
+	if err := json.Unmarshal(w.Body.Bytes(), &evs); err != nil || len(evs) < 2 || evs[0].Msg != "segundo" {
+		t.Fatalf("HTTP %d: %s", w.Code, w.Body)
+	}
+}
+
+// withSession adds a live session cookie to r.
+func withSession(a *Agent, r *http.Request) *http.Request {
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: a.sessions.create()})
+	return r
 }

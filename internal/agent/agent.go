@@ -3,7 +3,6 @@ package agent
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -63,7 +62,7 @@ type Config struct {
 		DefaultExpiryMin int `yaml:"default_expiry_min"`
 	} `yaml:"maintenance"`
 	DNS struct {
-		Enabled   bool   `yaml:"enabled"`
+		Enabled   *bool  `yaml:"enabled,omitempty"` // ignored: DNS is always on; read only so older files still load
 		APIURL    string `yaml:"api_url"`
 		TokenFile string `yaml:"token_file"`
 		Zone      string `yaml:"zone"`
@@ -79,7 +78,9 @@ type Config struct {
 		PrepullAt string `yaml:"prepull_at"`
 	} `yaml:"nightly"`
 	UI struct {
-		Listen string `yaml:"listen"` // the login is in user.yml, next to this file
+		Listen  string `yaml:"listen"`   // the login is in user.yml, next to this file
+		TLSCert string `yaml:"tls_cert"` // PEM; with tls_key the UI is HTTPS, without both HTTP
+		TLSKey  string `yaml:"tls_key"`
 	} `yaml:"ui"`
 }
 
@@ -98,8 +99,10 @@ func (c *Config) validate() error {
 		return errors.New("server.ip, server.npm_check_host, tnas_ip e router_ip são obrigatórios")
 	case c.Paths.MirrorSubvol == "" || c.Paths.SnapshotsDir == "" || c.NPM.Dir == "":
 		return errors.New("paths.mirror_subvol, paths.snapshots_dir e npm.dir são obrigatórios")
-	case c.DNS.Enabled && (c.DNS.APIURL == "" || c.DNS.TokenFile == "" || c.DNS.Zone == ""):
-		return errors.New("dns.api_url, dns.token_file e dns.zone são obrigatórios com dns.enabled")
+	case c.DNS.APIURL == "" || c.DNS.TokenFile == "" || c.DNS.Zone == "":
+		return errors.New("dns.api_url, dns.token_file e dns.zone são obrigatórios")
+	case (c.UI.TLSCert == "") != (c.UI.TLSKey == ""):
+		return errors.New("ui.tls_cert e ui.tls_key vão juntos")
 	}
 	if at := c.Nightly.PrepullAt; at != "" {
 		if _, err := time.Parse("15:04", at); err != nil || len(at) != 5 {
@@ -142,6 +145,7 @@ func LoadConfig(path string) (Config, error) {
 	if err := c.validate(); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
+	c.DNS.Enabled = nil // gone from the file on the next save
 	return c, nil
 }
 
@@ -193,8 +197,10 @@ type Event struct {
 
 type State struct {
 	RouterOK     bool      `json:"router_ok"`
-	TNASUp       bool      `json:"tnas_up"`   // its LAN IP answers; with RouterOK, it is on the LAN
-	ServerUp     bool      `json:"server_up"` // NPM or ping answered; meaningless without the router
+	TNASNetOK    bool      `json:"tnas_net_ok"`   // its Technitium reaches the internet
+	ServerNetOK  bool      `json:"server_net_ok"` // same for the server's; kept as it was while the server is down
+	TNASUp       bool      `json:"tnas_up"`       // its LAN IP answers; with RouterOK, it is on the LAN
+	ServerUp     bool      `json:"server_up"`     // NPM or ping answered; meaningless without the router
 	ServerNPMOK  bool      `json:"server_npm_ok"`
 	NPMFailSince time.Time `json:"npm_fail_since,omitzero"`
 	NPMAlerted   bool      `json:"npm_alerted,omitempty"`
@@ -210,10 +216,8 @@ type State struct {
 	ImagesAt   time.Time            `json:"images_at,omitzero"`
 	ImagesMsg  string               `json:"images_msg,omitempty"`
 	Services   map[string]*SvcState `json:"services"`
-	Events     []Event              `json:"events"`
+	Events     []Event              `json:"events,omitempty"` // only read: moved to events.jsonl on start
 }
-
-const maxEvents = 200
 
 // System is every side effect the agent has, so tests can replace it.
 type System interface {
@@ -221,6 +225,7 @@ type System interface {
 	Output(name string, args ...string) (string, error) // same, when stdout matters (image scan)
 	Check(host, ip string) error                        // https://host with the connection sent to ip (curl --resolve)
 	Get(url, bearer string) ([]byte, error)
+	Resolve(ip string) error // the resolver at ip answers for a name from the internet
 }
 
 type Agent struct {
@@ -228,28 +233,32 @@ type Agent struct {
 	// outside it; the actions (compose up/down, btrfs) run inside, so a UI
 	// write waits only while a failover or a return is being carried out.
 	// Reads use view and never wait.
-	mu        sync.Mutex
-	cfg       Config
-	st        State
-	sys       System
-	now       time.Time // time of the operation in progress
-	cfgPath   string
-	statePath string
-	wake      chan struct{}
-	view      atomic.Pointer[[]byte]
-	pulling   atomic.Bool
-	scanning  atomic.Bool
-	pushErr   string
-	beats     map[string][]Beat
-	tnasSeen  bool // last TNAS ping, so a change is logged once
-	userPath  string
-	creds     atomic.Pointer[creds] // read by every request, so outside mu
-	sessions  sessions
+	mu         sync.Mutex
+	cfg        Config
+	st         State
+	sys        System
+	now        time.Time // time of the operation in progress
+	cfgPath    string
+	statePath  string
+	eventsPath string
+	evMu       sync.Mutex // guards events, apart from mu so the page can read them mid-tick
+	events     []Event    // oldest first
+	trimmedOn  string     // the day trimEvents last ran, as 2006-01-02
+	wake       chan struct{}
+	view       atomic.Pointer[[]byte]
+	pulling    atomic.Bool
+	scanning   atomic.Bool
+	pushErr    string
+	beats      map[string][]Beat
+	tnasSeen   bool // last TNAS ping, so a change is logged once
+	userPath   string
+	creds      atomic.Pointer[creds] // read by every request, so outside mu
+	sessions   sessions
 }
 
 func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error) {
 	a := &Agent{cfg: cfg, cfgPath: cfgPath, statePath: statePath, sys: sys, wake: make(chan struct{}, 1), now: time.Now(), beats: map[string][]Beat{}, tnasSeen: true}
-	a.st.RouterOK = true
+	a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK = true, true, true
 	b, err := os.ReadFile(statePath)
 	switch {
 	case err == nil:
@@ -263,6 +272,16 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	if a.st.Services == nil {
 		a.st.Services = map[string]*SvcState{}
 	}
+	a.eventsPath = eventsPath(statePath)
+	evs, err := loadEvents(a.eventsPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		evs = a.st.Events // from before events.jsonl
+	case err != nil:
+		return nil, err
+	}
+	a.events, a.st.Events = evs, nil
+	a.trimEvents()
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
 	if err != nil {
@@ -312,6 +331,9 @@ func (a *Agent) Tick(now time.Time) {
 	a.stopIdleNPM()
 	a.report()
 	a.nightly()
+	if a.now.Format(time.DateOnly) != a.trimmedOn {
+		a.trimEvents()
+	}
 	a.save()
 }
 
@@ -332,14 +354,6 @@ func (a *Agent) service(name string) (Service, bool) {
 		return Service{}, false
 	}
 	return a.cfg.Services[i], true
-}
-
-func (a *Agent) event(svc, msg string) {
-	slog.Info(msg, "svc", cmp.Or(svc, "global"))
-	a.st.Events = append(a.st.Events, Event{T: a.now, Svc: svc, Msg: msg})
-	if n := len(a.st.Events); n > maxEvents {
-		a.st.Events = slices.Clone(a.st.Events[n-maxEvents:])
-	}
 }
 
 // warn records a repeating problem once, not every tick.
@@ -371,17 +385,9 @@ func (a *Agent) Preflight() {
 	check("ping ao TNAS "+c.TNASIP, a.pingErr(c.TNASIP))
 	check("ping ao servidor "+c.Server.IP, a.pingErr(c.Server.IP))
 	check("NPM do servidor (https://"+c.Server.NPMCheckHost+")", a.sys.Check(c.Server.NPMCheckHost, c.Server.IP))
-	// What a failover needs to pull a missing image. Any HTTP answer means it
-	// was reached: without a login the registry answers 401.
-	_, err := a.sys.Get("https://registry-1.docker.io/v2/", "")
-	if err != nil && strings.HasPrefix(err.Error(), "HTTP ") {
-		err = nil
-	}
-	check("internet (registry-1.docker.io)", err)
-	if !c.DNS.Enabled {
-		slog.Info("arranque: DNS desligado")
-		return
-	}
+	check("internet (registry-1.docker.io)", a.internetErr())
+	check("internet pelo DNS do TNAS "+c.TNASIP, a.sys.Resolve(c.TNASIP))
+	check("internet pelo DNS do servidor "+c.Server.IP, a.sys.Resolve(c.Server.IP))
 	b, _ := os.ReadFile(c.DNS.TokenFile)
 	check("token do Technitium ("+c.DNS.APIURL+")", testToken(a.sys, c.DNS.APIURL, c.DNS.Zone, strings.TrimSpace(string(b))))
 }
@@ -394,6 +400,7 @@ func (a *Agent) inMaint(s *SvcState) bool {
 // with the server down it spends seconds on timeouts.
 type probe struct {
 	routerOK, npmOK, serverPing, tnasNPMOK bool
+	tnasNet, serverNet                     bool // each Technitium reaches the internet
 	tnasPing                               bool // its own LAN IP is up (answered locally)
 	npmMs                                  int
 	svcOK                                  map[string]bool
@@ -428,11 +435,23 @@ func (a *Agent) probe() probe {
 	if tnasNPM {
 		wg.Go(func() { p.tnasNPMOK = a.sys.Check(c.Server.NPMCheckHost, c.TNASIP) == nil })
 	}
+	wg.Go(func() { p.tnasNet = a.sys.Resolve(c.TNASIP) == nil })
+	wg.Go(func() { p.serverNet = a.sys.Resolve(c.Server.IP) == nil })
 	wg.Wait()
 	for i, sv := range c.Services {
 		p.svcOK[sv.Name], p.svcMs[sv.Name] = ok[i], ms[i]
 	}
 	return p
+}
+
+// internetErr asks Docker Hub, where a failover pulls a missing image, at start. Any
+// HTTP answer means it was reached: without a login the registry answers 401.
+func (a *Agent) internetErr() error {
+	_, err := a.sys.Get("https://registry-1.docker.io/v2/", "")
+	if err != nil && strings.HasPrefix(err.Error(), "HTTP ") {
+		return nil
+	}
+	return err
 }
 
 // Beat is one check of the server's NPM ("npm") or of a service, for the
@@ -498,6 +517,16 @@ func (a *Agent) evaluate(p probe) {
 	}
 	if !st.RouterOK {
 		return
+	}
+	netSeen := func(was *bool, ok bool, who string) {
+		if ok != *was {
+			*was = ok
+			a.event("", map[bool]string{true: who + ": internet acessível", false: who + ": sem internet, o DNS não resolve nomes de fora"}[ok])
+		}
+	}
+	netSeen(&st.TNASNetOK, p.tnasNet, "TNAS")
+	if p.npmOK || p.serverPing { // a server that is down says nothing about its internet
+		netSeen(&st.ServerNetOK, p.serverNet, "servidor")
 	}
 
 	known := a.serverNPM(p)
@@ -578,9 +607,6 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 	case FailingOver:
 		a.failover(sv, s)
 	case Active:
-		if err := a.addDNS(sv, s); err != nil { // DNS turned on during the failover
-			a.warn(&s.Msg, sv.Name, err.Error())
-		}
 		if !known {
 			return
 		}
@@ -616,6 +642,10 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 
 func (a *Agent) failover(sv Service, s *SvcState) {
 	c := &a.cfg
+	if s.Snapshot == "" && !c.hasToken() { // without DNS the copy would serve no one
+		a.fail(sv, s, "falta o token do Technitium: põe-no em Definições")
+		return
+	}
 	if s.Snapshot == "" && !a.startCopy(sv, s) {
 		return
 	}
@@ -636,9 +666,9 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 	a.event(sv.Name, "em failover no TNAS")
 }
 
-// addDNS points the service's name to the TNAS, when DNS is on and it is not yet.
+// addDNS points the service's name to the TNAS, unless it already does.
 func (a *Agent) addDNS(sv Service, s *SvcState) error {
-	if !a.cfg.DNS.Enabled || s.DNS {
+	if s.DNS {
 		return nil
 	}
 	if err := a.dns("add", sv.Host); err != nil {
@@ -1067,6 +1097,9 @@ func (a *Agent) publish() {
 	for _, sv := range a.cfg.Services {
 		svcs = append(svcs, svcView{sv, a.svc(sv.Name)})
 	}
+	a.evMu.Lock()
+	recent := slices.Clone(a.events[max(0, len(a.events)-statusEvents):])
+	a.evMu.Unlock()
 	// A struct, not a map: omitzero only works on fields, and a zero time
 	// sent as "0001-01-01" reads as a date in the page.
 	b, _ := json.Marshal(struct {
@@ -1078,13 +1111,14 @@ func (a *Agent) publish() {
 		CheckIntervalS   int       `json:"check_interval_s"`
 		StartTimeoutMin  int       `json:"start_timeout_min"`
 		DefaultExpiryMin int       `json:"default_expiry_min"`
-		DNSEnabled       bool      `json:"dns_enabled"`
 		DNSToken         bool      `json:"dns_token"`
 		DNSAPIURL        string    `json:"dns_api_url"`
 		ServerIP         string    `json:"server_ip"`
 		TNASIP           string    `json:"tnas_ip"`
 		RouterIP         string    `json:"router_ip"`
 		RouterOK         bool      `json:"router_ok"`
+		TNASNetOK        bool      `json:"tnas_net_ok"`
+		ServerNetOK      bool      `json:"server_net_ok"`
 		TNASUp           bool      `json:"tnas_up"`
 		ServerUp         bool      `json:"server_up"`
 		ServerNPMOK      bool      `json:"server_npm_ok"`
@@ -1103,10 +1137,10 @@ func (a *Agent) publish() {
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
 	}{
-		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.DNS.Enabled, a.cfg.hasToken(), a.cfg.DNS.APIURL,
-		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
+		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
+		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
-		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, a.st.Events,
+		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 	})
 	a.view.Store(&b)
 }

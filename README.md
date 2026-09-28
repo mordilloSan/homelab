@@ -12,7 +12,7 @@ No TNAS, com o [docker-compose.yml](deploy/docker-compose.yml) em `/Volume1/Dock
 docker compose pull && docker compose up -d
 ```
 
-O primeiro arranque cria `config/failover.yml` (modo observe, DNS desligado), `config/user.yml` (`admin` / `admin`, em bcrypt) e os overrides em `overrides/`. Depois:
+O primeiro arranque cria `config/failover.yml` (modo observe), `config/user.yml` (`admin` / `admin`, em bcrypt) e os overrides em `overrides/`. Depois:
 
 1. Entra em `http://192.168.1.249:8099` e muda a password.
 2. Revê o `config/failover.yml` (tokens do Kuma, `dns.api_url` e `dns.zone`). O token do Technitium põe-se na interface, em ⚙ **Definições**, que o testa antes de o gravar em `config/technitium.token`.
@@ -27,8 +27,7 @@ Antes de ligar, confirma nos composes do servidor: o ML do Immich chama-se `immi
 | Fase | Configuração |
 |---|---|
 | F2 observação | `mode: observe` — as decisões só ficam nos eventos |
-| F3 ações sem DNS | DNS desligado + botões **Forçar failover** / **Forçar regresso** |
-| F4 DNS | ⚙ **Definições** → DNS ligado (grava `dns.enabled` no ficheiro, sem reiniciar). Só se desliga sem serviços com o DNS a apontar para o TNAS |
+| F3/F4 ações e DNS | token do Technitium em ⚙ **Definições** + botões **Forçar failover** / **Forçar regresso** |
 | F6 automático | `mode: auto` na interface |
 
 ## Desenvolvimento
@@ -46,8 +45,13 @@ O `e2e` e o `start` partilham containers: não corras os dois ao mesmo tempo. S�
 
 ## Comportamento que o plano não fixava
 
-- **Configuração:** `tnas_ip` no topo (as cópias também se verificam por ele, R5); campos novos `mode`, `lan_iface`, `start_timeout_min`, `dns.enabled`, `kuma.npm_token`. Guardar na interface reescreve o `failover.yml` sem comentários.
-- **§16:** porta 8099 em HTTP; intervalo de 60 s; a manutenção bloqueia só failovers e o tempo de espera de um serviço só começa quando ela acaba; o TTL do wildcard fica no Technitium.
+- **Configuração:** `tnas_ip` no topo (as cópias também se verificam por ele, R5); campos novos `mode`, `lan_iface`, `start_timeout_min`, `kuma.npm_token`. Guardar na interface reescreve o `failover.yml` sem comentários.
+- **DNS sempre ligado:** sem DNS a cópia não serve ninguém, por isso as fases F3 e F4 juntaram-se. Sem token do Technitium, um failover dá ERROR antes do snapshot. Um `dns.enabled` antigo é ignorado e sai do ficheiro na próxima gravação.
+- **Internet:** a cada intervalo, cada caixa pede ao seu Technitium (`server.ip` e `tnas_ip`, porta 53) um nome aleatório em `docker.io`, que nenhuma cache tem; só informa, não decide nada. O Docker Hub em HTTPS só se testa no arranque. No e2e não há Technitium, por isso a internet aparece em falta.
+- **Sessão:** sai sozinha após 30 min sem atividade.
+- **Interface:** três separadores (Visão geral, Eventos, Definições), com o separador no endereço (`#/eventos`, `#/definicoes/dns`). A espera e a estabilidade de cada serviço mudam-se no painel do serviço; o modo e o intervalo em Definições → Geral (passar a automático pede confirmação).
+- **Eventos:** em `state/events.jsonl`, uma linha por evento; ficam 30 dias, até 5000. Os de um `state.json` antigo passam para lá no arranque.
+- **§16:** porta 8099 em HTTP, ou HTTPS com `ui.tls_cert` e `ui.tls_key` (sem redirecionamento de HTTP); intervalo de 60 s; a manutenção bloqueia só failovers e o tempo de espera de um serviço só começa quando ela acaba; o TTL do wildcard fica no Technitium.
 - **ERROR:** a cópia é removida logo, sem nova tentativa; sai quando o serviço volta no servidor ou com **Forçar failover**. Um IP `.92` ocupado (R3) dá ERROR antes do snapshot.
 - **Caso 2.3:** um failover em curso continua.
 - **`down`:** sempre `docker compose -p failover-<svc> down -v`, funciona sem snapshot e descarta volumes com nome (O3).

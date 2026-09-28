@@ -30,7 +30,7 @@ func FirstRun(cfgPath string) error {
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		return err
 	}
-	slog.Info("sem configuração: criada a por defeito (modo observe, DNS desligado)", "file", cfgPath)
+	slog.Info("sem configuração: criada a por defeito (modo observe)", "file", cfgPath)
 	return writeAtomic(cfgPath, defaultConfig)
 }
 
