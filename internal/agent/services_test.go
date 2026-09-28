@@ -36,7 +36,7 @@ func svcSetup(t *testing.T) (*Agent, *fake) {
 }
 
 const nextcloud = `{"new":true,"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":5,"stability_min":10,
-	"icon":"cube","override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":"nctok"}`
+	"icon":"","override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":"nctok"}`
 
 func TestServiceAdd(t *testing.T) {
 	a, _ := svcSetup(t)
@@ -44,7 +44,7 @@ func TestServiceAdd(t *testing.T) {
 		t.Fatalf("HTTP %d: %s", code, body)
 	}
 	sv, ok := a.service("nextcloud")
-	if !ok || sv.Override != "nextcloud.override.yml" || sv.Icon != "cube" || a.cfg.Kuma.ServiceTokens["nextcloud"] != "nctok" {
+	if !ok || sv.Override != "nextcloud.override.yml" || a.cfg.Kuma.ServiceTokens["nextcloud"] != "nctok" {
 		t.Fatalf("serviço: %+v, token %q", sv, a.cfg.Kuma.ServiceTokens["nextcloud"])
 	}
 	if b, err := os.ReadFile(filepath.Join(a.cfg.Paths.OverridesDir, "nextcloud.override.yml")); err != nil || !strings.Contains(string(b), "cron") {
@@ -97,12 +97,12 @@ func TestServiceEdit(t *testing.T) {
 	if code, body := postTo(t, a.postService, nextcloud); code != 204 {
 		t.Fatalf("HTTP %d: %s", code, body)
 	}
-	edit := `{"name":"nextcloud","dir":"nextcloud","host":"cloud2.engmariz.com","wait_min":5,"stability_min":10,"icon":"cube","override_yaml":"","kuma_token":""}`
-	a.st.Services["nextcloud"] = &SvcState{State: Active}
+	edit := `{"name":"nextcloud","dir":"nextcloud","host":"cloud2.engmariz.com","wait_min":5,"stability_min":10,"icon":"","override_yaml":"","kuma_token":""}`
+	underLock(a, func() { a.st.Services["nextcloud"] = &SvcState{State: Active} })
 	if code, _ := postTo(t, a.postService, edit); code != 409 {
 		t.Fatalf("mudou o endereço com o serviço em failover: %d", code)
 	}
-	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":15,"stability_min":10,"icon":"cube",
+	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":15,"stability_min":10,"icon":"",
 		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":""}`
 	if code, body := postTo(t, a.postService, keep); code != 204 {
 		t.Fatalf("a espera em failover foi recusada: %d %s", code, body)
@@ -110,7 +110,7 @@ func TestServiceEdit(t *testing.T) {
 	if sv, _ := a.service("nextcloud"); sv.WaitMin != 15 || a.cfg.Kuma.ServiceTokens["nextcloud"] != "nctok" {
 		t.Fatalf("%+v %q", sv, a.cfg.Kuma.ServiceTokens["nextcloud"])
 	}
-	a.st.Services["nextcloud"].State = Normal
+	underLock(a, func() { a.st.Services["nextcloud"].State = Normal })
 	if code, _ := postTo(t, a.postService, edit); code != 204 {
 		t.Fatal("editar em NORMAL recusado")
 	}
@@ -151,12 +151,12 @@ func TestServiceRemove(t *testing.T) {
 	if code, _ := postTo(t, a.postService, nextcloud); code != 204 {
 		t.Fatal("adicionar")
 	}
-	a.beats["nextcloud"] = []Beat{{S: "up"}}
-	a.st.Services["nextcloud"] = &SvcState{State: Active}
+	underLock(a, func() { a.beats["nextcloud"] = []Beat{{S: "up"}} })
+	underLock(a, func() { a.st.Services["nextcloud"] = &SvcState{State: Active} })
 	if code, _ := postTo(t, a.postServiceRemove, `{"name":"nextcloud"}`); code != 409 {
 		t.Fatalf("removeu um serviço em failover: %d", code)
 	}
-	a.st.Services["nextcloud"].State = Normal
+	underLock(a, func() { a.st.Services["nextcloud"].State = Normal })
 	if code, _ := postTo(t, a.postServiceRemove, `{"name":"nextcloud"}`); code != 204 {
 		t.Fatalf("remover: %d", code)
 	}
@@ -191,9 +191,9 @@ func TestServiceEditKeepsOverride(t *testing.T) {
 	if err := os.WriteFile(ov, []byte(crlf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a.st.Services["nextcloud"] = &SvcState{State: Active}
+	underLock(a, func() { a.st.Services["nextcloud"] = &SvcState{State: Active} })
 	f.failCmd = []string{"docker compose -p failover-nextcloud"}
-	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":20,"stability_min":10,"icon":"cube",
+	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":20,"stability_min":10,"icon":"",
 		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":""}`
 	if code, body := postTo(t, a.postService, keep); code != 204 {
 		t.Fatalf("mudar só a espera em failover: HTTP %d %s", code, body)
@@ -216,4 +216,12 @@ func TestServiceDuplicateHostDir(t *testing.T) {
 			t.Errorf("%s repetido: HTTP %d %s", field, code, got)
 		}
 	}
+}
+
+// underLock changes the agent the way a handler does, so the background icon
+// fetch (which publishes under mu) does not race the test.
+func underLock(a *Agent, f func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	f()
 }

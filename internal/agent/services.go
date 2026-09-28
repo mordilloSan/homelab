@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -17,8 +16,6 @@ import (
 
 // Services added, edited and removed from the UI. The name never changes:
 // it is in the compose projects, the snapshots, the state and the tokens.
-
-var validIcon = regexp.MustCompile(`^[a-z]*$`)
 
 type mirrorDir struct {
 	Dir string `json:"dir"`
@@ -74,11 +71,24 @@ type serviceReq struct {
 // is away from the server (its folder, address, override, IP) only changes
 // with it in NORMAL.
 //
-//nolint:gocognit // one request, checked in the order the form reads
+//nolint:gocognit,cyclop // one request, checked in the order the form reads
 func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	var req serviceReq
 	if !decode(w, r, &req) {
 		return
+	}
+	// The icon's link is downloaded before the lock: it may take seconds.
+	var iconBytes []byte
+	if req.Icon = strings.TrimSpace(req.Icon); req.Icon != "" {
+		if !isURL(req.Icon) {
+			fieldErr(w, "icon", "tem de ser um link http:// ou https:// para uma imagem")
+			return
+		}
+		var err error
+		if iconBytes, err = a.downloadIcon([]string{req.Icon}); err != nil {
+			fieldErr(w, "icon", "não consegui usar este ícone: "+err.Error())
+			return
+		}
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -157,6 +167,11 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	}
 	a.cfg = next
 	a.now = time.Now()
+	if iconBytes != nil {
+		a.storeIcon(sv.Name, iconSources(sv), iconBytes)
+	} else {
+		a.iconJobs.Go(a.fetchIcons) // no link: dashboard-icons by name or folder
+	}
 	go a.scanImages()
 	a.done(w, sv.Name, map[bool]string{true: "serviço adicionado", false: "serviço alterado"}[req.New])
 }
@@ -235,6 +250,7 @@ func (a *Agent) postServiceRemove(w http.ResponseWriter, r *http.Request) {
 	delete(a.st.Services, req.Name)
 	delete(a.beats, req.Name)
 	delete(a.st.Images, req.Name)
+	a.dropIcon(req.Name)
 	a.now = time.Now()
 	a.done(w, req.Name, "serviço removido")
 }

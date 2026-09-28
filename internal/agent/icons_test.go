@@ -1,0 +1,82 @@
+package agent
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+var (
+	pngIcon = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	svgIcon = []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>`)
+)
+
+// A link given in the form is downloaded when the service is saved, kept in
+// the state folder and served from there; the page never goes out for it.
+func TestServiceIconLink(t *testing.T) {
+	a, f := svcSetup(t)
+	f.bodies = map[string][]byte{"https://example.com/nc.png": pngIcon}
+	body := strings.Replace(nextcloud, `"icon":""`, `"icon":"https://example.com/nc.png"`, 1)
+	if code, got := postTo(t, a.postService, body); code != 204 {
+		t.Fatalf("HTTP %d %s", code, got)
+	}
+	if b, err := os.ReadFile(filepath.Join(a.iconDir(), "nextcloud")); err != nil || string(b) != string(pngIcon) {
+		t.Fatalf("ícone guardado: %v %q", err, b)
+	}
+	if v := string(*a.view.Load()); !strings.Contains(v, `"icon_v":"`) {
+		t.Fatal("o estado não diz que há ícone")
+	}
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, withSession(a, httptest.NewRequest(http.MethodGet, "/icons/nextcloud", nil)))
+	if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("HTTP %d %v", w.Code, w.Header())
+	}
+	for _, p := range []string{"/icons/vaultwarden", "/icons/..%2Fstate.json", "/icons/Nextcloud"} {
+		w := httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, withSession(a, httptest.NewRequest(http.MethodGet, p, nil)))
+		if w.Code != 404 {
+			t.Errorf("%s: HTTP %d", p, w.Code)
+		}
+	}
+	if code, _ := postTo(t, a.postServiceRemove, `{"name":"nextcloud"}`); code != 204 || fileExists(filepath.Join(a.iconDir(), "nextcloud")) {
+		t.Fatal("remover deixou o ícone")
+	}
+}
+
+// A link that is not an image, or not a link, is refused in the form.
+func TestServiceIconRefused(t *testing.T) {
+	a, f := svcSetup(t)
+	f.bodies = map[string][]byte{"https://example.com/page": []byte("<html><body>olá</body></html>")}
+	for _, icon := range []string{"https://example.com/page", "cube", "ftp://x/y.png"} {
+		body := strings.Replace(nextcloud, `"icon":""`, `"icon":"`+icon+`"`, 1)
+		if code, got := postTo(t, a.postService, body); code != 400 || !strings.Contains(got, `"field":"icon"`) {
+			t.Errorf("%s: HTTP %d %s", icon, code, got)
+		}
+	}
+}
+
+// Without a link, the icon of dashboard-icons by the service's name, else by
+// its folder; neither there, the page's own.
+func TestServiceIconGuess(t *testing.T) {
+	a, f := setup(t)
+	// vaultwarden by name in SVG; speedtest by its folder, only in PNG
+	f.bodies = map[string][]byte{iconsCDN + "png/speedtest-tracker.png": pngIcon, iconsCDN + "svg/vaultwarden.svg": svgIcon}
+	a.fetchIcons()
+	if !fileExists(filepath.Join(a.iconDir(), "speedtest")) || !fileExists(filepath.Join(a.iconDir(), "vaultwarden")) {
+		t.Fatal("não usou o ícone do dashboard-icons pelo nome ou pela pasta")
+	}
+	if fileExists(filepath.Join(a.iconDir(), "homepage")) {
+		t.Fatal("guardou uma resposta que não é imagem")
+	}
+	f.reset()
+	a.fetchIcons() // hits and misses are remembered: nothing is asked again
+	if hasGet(f, iconsCDN) {
+		t.Fatalf("voltou a pedir: %v", f.gets)
+	}
+	if got := iconType(svgIcon); got != "image/svg+xml" {
+		t.Fatalf("svg: %s", got)
+	}
+}

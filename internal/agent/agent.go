@@ -36,7 +36,7 @@ type Service struct {
 	StabilityMin  int    `yaml:"stability_min" json:"stability_min"`
 	Override      string `yaml:"override,omitempty" json:"override,omitempty"`
 	RequireFreeIP string `yaml:"require_free_ip,omitempty" json:"require_free_ip,omitempty"`
-	Icon          string `yaml:"icon,omitempty" json:"icon,omitempty"` // one of the page's icons; empty: by name, or a cube
+	Icon          string `yaml:"icon,omitempty" json:"icon,omitempty"` // a link to an image; empty: dashboard-icons by name or folder
 }
 
 type Config struct {
@@ -191,7 +191,7 @@ func (c *Config) validateService(s Service, seen map[string]bool) error {
 		{s.StabilityMin < 0, "stability_min", "não pode ser negativa"},
 		{s.RequireFreeIP != "" && !isIP(s.RequireFreeIP), "require_free_ip", "tem de ser um endereço IP"},
 		{s.RequireFreeIP != "" && c.LANIface == "", "require_free_ip", "precisa da interface da LAN (Definições → Rede)"},
-		{!validIcon.MatchString(s.Icon), "icon", "ícone desconhecido"},
+		{s.Icon != "" && !isURL(s.Icon), "icon", "tem de ser um link http:// ou https:// para uma imagem"},
 	} {
 		if r.bad {
 			return fe(r.field, r.msg)
@@ -312,13 +312,16 @@ type Agent struct {
 	cfgPath    string
 	statePath  string
 	eventsPath string
-	evMu       sync.Mutex                // guards events, apart from mu so the page can read them mid-tick
-	events     []Event                   // oldest first
-	trimmedOn  string                    // the day trimEvents last ran, as 2006-01-02
-	tnasIP     atomic.Pointer[string]    // for the certificate, read on handshakes without mu
-	restart    func()                    // ends Run so Docker starts the agent again (SetRestart)
-	listening  string                    // the UI's address in use, which a saved ui.listen may differ from
-	certs      atomic.Pointer[certStore] // set when the UI serves TLS
+	evMu       sync.Mutex             // guards events, apart from mu so the page can read them mid-tick
+	events     []Event                // oldest first
+	trimmedOn  string                 // the day trimEvents last ran, as 2006-01-02
+	tnasIP     atomic.Pointer[string] // for the certificate, read on handshakes without mu
+	restart    func()                 // ends Run so Docker starts the agent again (SetRestart)
+	listening  string                 // the UI's address in use, which a saved ui.listen may differ from
+	certs      atomic.Pointer[certStore]
+	iconMu     sync.Mutex        // guards iconRev and the icon files; never held while taking mu
+	iconRev    map[string]string // service → version of its stored icon, for the page's cache
+	iconJobs   sync.WaitGroup    // fetchIcons in the background (tests wait for it) // set when the UI serves TLS
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool
@@ -358,6 +361,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	a.events, a.st.Events = evs, nil
 	a.trimEvents()
 	a.tnasIP.Store(&cfg.TNASIP)
+	a.iconRev = map[string]string{}
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
 	if err != nil {
@@ -371,6 +375,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 // Run ticks until ctx ends. A tick in progress always finishes: stopping in
 // the middle of a failover would leave a snapshot the state does not know.
 func (a *Agent) Run(ctx context.Context) {
+	a.iconJobs.Go(a.fetchIcons)
 	for {
 		a.mu.Lock()
 		stale := time.Since(a.st.ImagesAt) > time.Hour
@@ -1173,11 +1178,12 @@ func (a *Agent) publish() {
 	type svcView struct {
 		Service
 		*SvcState
-		KumaToken bool `json:"kuma_token"` // set or not; the token never leaves the agent
+		KumaToken bool   `json:"kuma_token"` // set or not; the token never leaves the agent
+		IconV     string `json:"icon_v,omitempty"`
 	}
 	svcs := make([]svcView, 0, len(a.cfg.Services))
 	for _, sv := range a.cfg.Services {
-		svcs = append(svcs, svcView{sv, a.svc(sv.Name), a.cfg.Kuma.ServiceTokens[sv.Name] != ""})
+		svcs = append(svcs, svcView{sv, a.svc(sv.Name), a.cfg.Kuma.ServiceTokens[sv.Name] != "", a.iconV(sv.Name)})
 	}
 	names, notAfter := a.CertInfo()
 	a.evMu.Lock()

@@ -45,6 +45,7 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("POST /api/config/check", a.postCheck)
 	mux.HandleFunc("POST /api/restart", a.postRestart)
 	mux.HandleFunc("GET /api/mirror", a.getMirror)
+	mux.HandleFunc("GET /icons/{name}", a.getIcon)
 	mux.HandleFunc("GET /api/service/override", a.getServiceOverride)
 	mux.HandleFunc("POST /api/service", a.postService)
 	mux.HandleFunc("POST /api/service/remove", a.postServiceRemove)

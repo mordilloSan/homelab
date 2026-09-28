@@ -22,7 +22,7 @@ Abre no painel do serviço ("Editar") ou vazio em **+ Adicionar serviço**.
 | Endereço | `host` | nome sem esquema nem `/` | não |
 | Espera antes do failover | `wait_min` | lista da parte A, ≥ 1 | sim |
 | Estabilidade antes do regresso | `stability_min` | lista, ≥ 0 | sim |
-| Ícone | `icon` | um dos ícones da página; vazio usa o de hoje por nome ou o cubo | sim |
+| Ícone | `icon` | link http(s) para uma imagem, descarregada pelo agente para `state/icons/` e servida daí; vazio usa o do dashboard-icons pelo nome e depois pela pasta (SVG, depois PNG), e na falta o ícone da página | sim |
 | Override | `override_yaml` | YAML; validado com `docker compose -f <compose> -f <override> config -q`; gravado em `<overrides>/<nome>.override.yml`; vazio tira o override | não |
 | IP que tem de estar livre | `require_free_ip` | IP; precisa de `lan_iface` | não |
 | Token do Kuma | `kuma_token` | segredo (vazio mantém) | sim |
