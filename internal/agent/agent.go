@@ -294,6 +294,8 @@ type Agent struct {
 	events     []Event                   // oldest first
 	trimmedOn  string                    // the day trimEvents last ran, as 2006-01-02
 	tnasIP     atomic.Pointer[string]    // for the certificate, read on handshakes without mu
+	restart    func()                    // ends Run so Docker starts the agent again (SetRestart)
+	listening  string                    // the UI's address in use, which a saved ui.listen may differ from
 	certs      atomic.Pointer[certStore] // set when the UI serves TLS
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
@@ -1139,6 +1141,11 @@ func (a *Agent) save() {
 	}
 }
 
+type certView struct {
+	Names    []string  `json:"names"`
+	NotAfter time.Time `json:"not_after,omitzero"`
+}
+
 // publish renders the UI status once, under the lock, so readers never wait.
 func (a *Agent) publish() {
 	type svcView struct {
@@ -1149,6 +1156,7 @@ func (a *Agent) publish() {
 	for _, sv := range a.cfg.Services {
 		svcs = append(svcs, svcView{sv, a.svc(sv.Name)})
 	}
+	names, notAfter := a.CertInfo()
 	a.evMu.Lock()
 	recent := slices.Clone(a.events[max(0, len(a.events)-statusEvents):])
 	a.evMu.Unlock()
@@ -1188,11 +1196,15 @@ func (a *Agent) publish() {
 		Beats            any       `json:"beats"`
 		Services         []svcView `json:"services"`
 		Events           []Event   `json:"events"`
+		Settings         any       `json:"settings"`
+		UIListenRunning  string    `json:"ui_listen_running"`
+		Cert             any       `json:"cert"`
 	}{
 		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
+		settingsView(&a.cfg), a.listening, certView{names, notAfter},
 	})
 	a.view.Store(&b)
 }

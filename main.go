@@ -127,6 +127,8 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	ln = agent.NewRedirectListener(ln, srv.TLSConfig) // HTTPS, and http:// on the same port redirects
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	a.SetListening(cfg.UI.Listen)
+	a.SetRestart(cancel) // the UI's restart: Run returns, the process exits 0 and Docker starts it again
 	serveErr := make(chan error, 1)
 	go func() {
 		if serr := srv.Serve(ln); !errors.Is(serr, http.ErrServerClosed) {
