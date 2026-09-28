@@ -157,12 +157,22 @@ func (c *Config) validate() error {
 			return fe("nightly.prepull_at", "tem de ser HH:MM")
 		}
 	}
-	seen := map[string]bool{"npm": true}
+	// One address per service (a return deletes the record a failover of
+	// another would need) and one folder (else the same containers twice).
+	seen, hosts, dirs := map[string]bool{"npm": true}, map[string]bool{}, map[string]bool{filepath.Clean(c.NPM.Dir): true}
 	for _, s := range c.Services {
-		if err := c.validateService(s, seen); err != nil {
+		err := c.validateService(s, seen)
+		switch {
+		case err != nil:
+		case hosts[strings.ToLower(s.Host)]:
+			err = fe("host", "já é o endereço de outro serviço")
+		case dirs[filepath.Clean(s.Dir)]:
+			err = fe("dir", "já é a pasta de outro serviço, ou a do NPM")
+		}
+		if err != nil {
 			return fmt.Errorf("serviço %s: %w", s.Name, err)
 		}
-		seen[s.Name] = true
+		seen[s.Name], hosts[strings.ToLower(s.Host)], dirs[filepath.Clean(s.Dir)] = true, true, true
 	}
 	return nil
 }

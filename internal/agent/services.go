@@ -101,12 +101,16 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	if yml != "" {
 		sv.Override = cmp.Or(old.Override, sv.Name+".override.yml")
 	}
+	// The override as it is: a save that leaves it alone neither rewrites it
+	// nor runs compose on it. CRLF (edited from Windows) reads as LF, as the
+	// browser's textarea does.
+	var cur []byte
+	if old.Override != "" {
+		cur, _ = os.ReadFile(filepath.Join(a.cfg.Paths.OverridesDir, old.Override))
+	}
+	sameOverride := yml == strings.TrimSpace(strings.ReplaceAll(string(cur), "\r\n", "\n")) && (yml == "" || old.Override != "")
 	if i >= 0 && a.svc(sv.Name).State != Normal {
-		cur, _ := os.ReadFile(filepath.Join(a.cfg.Paths.OverridesDir, old.Override))
-		if old.Override == "" {
-			cur = nil
-		}
-		if sv.Dir != old.Dir || sv.Host != old.Host || sv.RequireFreeIP != old.RequireFreeIP || yml != strings.TrimSpace(string(cur)) {
+		if sv.Dir != old.Dir || sv.Host != old.Host || sv.RequireFreeIP != old.RequireFreeIP || !sameOverride {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a pasta, o endereço, o override e o IP só mudam com o serviço no servidor"})
 			return
 		}
@@ -133,7 +137,7 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	undo := func() {}
-	if yml != "" {
+	if yml != "" && (!sameOverride || sv.Dir != old.Dir) { // a new folder is checked against the override
 		var ok bool
 		if undo, ok = a.writeOverride(w, next.Paths.OverridesDir, sv, compose, yml); !ok {
 			return

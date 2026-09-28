@@ -177,3 +177,43 @@ func TestMirrorDirs(t *testing.T) {
 		t.Fatalf("%s", w.Body)
 	}
 }
+
+// Outside NORMAL, a save that leaves the override as it is neither rewrites
+// it nor runs compose on it: only wait, stability, icon and token change.
+// An override written with CRLF (edited from Windows) counts as unchanged.
+func TestServiceEditKeepsOverride(t *testing.T) {
+	a, f := svcSetup(t)
+	if code, _ := postTo(t, a.postService, nextcloud); code != 204 {
+		t.Fatal("adicionar")
+	}
+	ov := filepath.Join(a.cfg.Paths.OverridesDir, "nextcloud.override.yml")
+	crlf := "services:\r\n  cron:\r\n    profiles: [\"disabled\"]\r\n"
+	if err := os.WriteFile(ov, []byte(crlf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.st.Services["nextcloud"] = &SvcState{State: Active}
+	f.failCmd = []string{"docker compose -p failover-nextcloud"}
+	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":20,"stability_min":10,"icon":"cube",
+		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":""}`
+	if code, body := postTo(t, a.postService, keep); code != 204 {
+		t.Fatalf("mudar só a espera em failover: HTTP %d %s", code, body)
+	}
+	if b, _ := os.ReadFile(ov); string(b) != crlf {
+		t.Fatalf("reescreveu o override da cópia a correr: %q", b)
+	}
+}
+
+// Two services cannot share an address (one's return would delete the
+// other's DNS record) or a folder (the same containers twice).
+func TestServiceDuplicateHostDir(t *testing.T) {
+	a, _ := svcSetup(t)
+	vw, _ := a.service("vaultwarden")
+	for field, body := range map[string]string{
+		"host": strings.Replace(nextcloud, "cloud.engmariz.com", vw.Host, 1),
+		"dir":  strings.Replace(strings.Replace(nextcloud, `"dir":"nextcloud"`, `"dir":"npm"`, 1), `"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n",`, "", 1),
+	} {
+		if code, got := postTo(t, a.postService, body); code != 400 || !strings.Contains(got, `"field":"`+field+`"`) {
+			t.Errorf("%s repetido: HTTP %d %s", field, code, got)
+		}
+	}
+}
