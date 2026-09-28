@@ -93,7 +93,7 @@ func healthcheck(cfgPath string) error {
 	if err != nil {
 		return err
 	}
-	return agent.Healthcheck(cfg.UI.Listen, cfg.UI.TLSCert != "")
+	return agent.Healthcheck(cfg.UI.Listen, cfg.UI.TLSCert)
 }
 
 // serve runs the agent until ctx ends. A signal stops it between ticks, never

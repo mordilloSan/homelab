@@ -2,11 +2,15 @@ package agent
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -99,15 +103,20 @@ func UITLS(certFile, keyFile string) (*tls.Config, error) {
 
 // Healthcheck asks the UI at listen for /healthz, on loopback when it listens
 // everywhere; the image's HEALTHCHECK runs it as "failover-agent healthcheck".
-func Healthcheck(listen string, https bool) error {
-	u, err := UIURL(listen, "127.0.0.1", https)
+// With certFile the UI is HTTPS and only that certificate is trusted, under
+// its own first name, since a loopback address is not in it.
+func Healthcheck(listen, certFile string) error {
+	u, err := UIURL(listen, "127.0.0.1", certFile != "")
 	if err != nil {
 		return err
 	}
-	c := http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
-		// Loopback: the certificate names the UI's hostname, not 127.0.0.1.
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: loopback only
-	}}
+	tr := &http.Transport{}
+	if certFile != "" {
+		if tr.TLSClientConfig, err = trustOnly(certFile); err != nil {
+			return err
+		}
+	}
+	c := http.Client{Timeout: 5 * time.Second, Transport: tr}
 	resp, err := c.Get(u + "/healthz")
 	if err != nil {
 		return err
@@ -117,6 +126,34 @@ func Healthcheck(listen string, https bool) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// trustOnly is a TLS config that accepts the certificate in certFile and no
+// other, checked against its first name (a wildcard stands for any label).
+func trustOnly(certFile string) (*tls.Config, error) {
+	b, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, fmt.Errorf("certificado da interface: %w", err)
+	}
+	blk, _ := pem.Decode(b)
+	pool := x509.NewCertPool()
+	if blk == nil || !pool.AppendCertsFromPEM(b) {
+		return nil, errors.New("certificado da interface ilegível")
+	}
+	leaf, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("certificado da interface: %w", err)
+	}
+	var name string
+	switch {
+	case len(leaf.DNSNames) > 0:
+		name = strings.Replace(leaf.DNSNames[0], "*", "healthcheck", 1)
+	case len(leaf.IPAddresses) > 0:
+		name = leaf.IPAddresses[0].String()
+	default:
+		return nil, errors.New("certificado da interface sem nomes")
+	}
+	return &tls.Config{RootCAs: pool, ServerName: name, MinVersion: tls.VersionTLS12}, nil
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

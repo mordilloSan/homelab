@@ -1,7 +1,14 @@
 package agent
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -194,19 +201,55 @@ func TestHealthcheck(t *testing.T) {
 	srv := httptest.NewServer(a.Handler())
 	defer srv.Close()
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
-	if err := Healthcheck("0.0.0.0:"+port, false); err != nil {
+	if err := Healthcheck("0.0.0.0:"+port, ""); err != nil {
 		t.Fatal(err)
 	}
 	srv.Close()
-	if Healthcheck("0.0.0.0:"+port, false) == nil {
+	if Healthcheck("0.0.0.0:"+port, "") == nil {
 		t.Fatal("healthcheck ok com a interface em baixo")
 	}
-	tsrv := httptest.NewTLSServer(a.Handler()) // certificate for example.com, not 127.0.0.1
-	defer tsrv.Close()
-	_, port, _ = net.SplitHostPort(tsrv.Listener.Addr().String())
-	if err := Healthcheck("0.0.0.0:"+port, true); err != nil {
-		t.Fatal("healthcheck em HTTPS:", err)
+
+	// HTTPS: it trusts only the UI's own certificate, never any certificate.
+	dir := t.TempDir()
+	for _, c := range []struct {
+		name  string
+		names []string
+	}{{"nome", []string{"failover.lan"}}, {"wildcard", []string{"*.engmariz.com"}}} {
+		cert, certFile := testCert(t, dir, c.name, c.names)
+		tsrv := httptest.NewUnstartedServer(a.Handler())
+		tsrv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+		tsrv.StartTLS()
+		_, port, _ = net.SplitHostPort(tsrv.Listener.Addr().String())
+		if err := Healthcheck("0.0.0.0:"+port, certFile); err != nil {
+			t.Errorf("%s: healthcheck em HTTPS: %v", c.name, err)
+		}
+		_, other := testCert(t, dir, c.name+"-outro", c.names)
+		if Healthcheck("0.0.0.0:"+port, other) == nil {
+			t.Errorf("%s: healthcheck ok com um certificado que não é o da interface", c.name)
+		}
+		tsrv.Close()
 	}
+}
+
+// testCert makes a self-signed certificate for names and writes its PEM to dir.
+func testCert(t *testing.T, dir, file string, names []string) (tls.Certificate, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), DNSNames: names,
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, file+".pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, path
 }
 
 // The address in the startup log: the TNAS IP instead of 0.0.0.0.
