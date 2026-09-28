@@ -129,6 +129,24 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 #settingsBody { display: grid; gap: 16px; }
 .set-sec { scroll-margin-top: 16px; }
 .set-sec h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+.set-form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; min-width: 0; }
+.set-field { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 16px; row-gap: 4px; align-items: center; }
+.set-label { display: flex; gap: 8px; align-items: center; }
+.set-input { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.set-input input { width: min(100%, 380px); padding: 7px 10px; border-radius: var(--radius); border: 1px solid var(--divider); background: var(--well); }
+.set-input input[type=number] { width: 96px; }
+.set-input input:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; }
+.set-help, .field-err { grid-column: 2; font-size: 11.5px; color: var(--muted); }
+.field-err { color: var(--error); }
+.field-err:empty, .sec-err:empty, .checks:empty { display: none; }
+.set-field:has(.field-err:not(:empty)) input { border-color: var(--error); }
+fieldset:disabled .set-input input { opacity: .6; cursor: not-allowed; }
+.checks { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 4px; font-size: 12.5px; }
+.checks li { display: flex; gap: 6px; align-items: center; }
+.checks .icon { width: 16px; height: 16px; }
+.sec-err { margin-top: 12px; }
+.sec-sub { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
+.set-sec .banner { margin-top: 12px; }
 select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well);
   font-variant-numeric: tabular-nums; }
 .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; margin-left: 4px; font-variant-numeric: tabular-nums; }
@@ -373,6 +391,8 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   main { padding-bottom: 88px; }
   .toasts { bottom: 84px; }
   .settings { grid-template-columns: minmax(0, 1fr); }
+  .set-field { grid-template-columns: minmax(0, 1fr); }
+  .set-help, .field-err { grid-column: 1; }
   .toc { display: none; }
   .lower { grid-template-columns: minmax(0, 1fr); }
   .topo { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clients" "server" "lane" "tnas" "internet"; row-gap: 0; }
@@ -456,7 +476,13 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
     <div class="settings">
       <nav class="toc" aria-label="Secções das definições">
         <a href="#/definicoes/geral" data-sub="geral">Geral</a>
+        <a href="#/definicoes/rede" data-sub="rede">Rede</a>
+        <a href="#/definicoes/verificacao" data-sub="verificacao">Verificação</a>
         <a href="#/definicoes/dns" data-sub="dns">DNS</a>
+        <a href="#/definicoes/kuma" data-sub="kuma">Uptime Kuma</a>
+        <a href="#/definicoes/caminhos" data-sub="caminhos">Caminhos</a>
+        <a href="#/definicoes/noturna" data-sub="noturna">Descarga noturna</a>
+        <a href="#/definicoes/interface" data-sub="interface">Interface</a>
         <a href="#/definicoes/conta" data-sub="conta">Conta</a>
       </nav>
       <div id="settingsBody"></div>
@@ -1055,35 +1081,198 @@ function svcPanel(s) {
 
 // Settings, as a page. Only values that rarely change go in the markup, so
 // the 5 s refresh does not repaint it while the token is being typed.
+// The sections with a form each: key (as in failover.yml), label, and n (a
+// number with that minimum), u (unit), s (secret), t (input type), h (help).
+const SECTIONS = [
+  {id: 'rede', title: 'Rede', locked: true, fields: [
+    {k: 'server.ip', l: 'IP do servidor'},
+    {k: 'server.npm_check_host', l: 'Endereço do NPM do servidor', h: 'O nome que o agente pede ao NPM do servidor em cada verificação.'},
+    {k: 'tnas_ip', l: 'IP do TNAS'},
+    {k: 'router_ip', l: 'IP do router'},
+    {k: 'lan_iface', l: 'Interface da LAN', h: 'Para o arping que confirma que um IP está livre antes de uma cópia o usar.'}]},
+  {id: 'verificacao', title: 'Verificação', fields: [
+    {k: 'start_timeout_min', l: 'Tempo para a cópia ficar pronta', u: 'min', n: 1, h: 'Depois disto sem responder, o failover dá erro.'},
+    {k: 'npm.alert_after_min', l: 'Avisar do NPM em falha após', u: 'min', n: 0},
+    {k: 'maintenance.default_expiry_min', l: 'Manutenção por defeito', u: 'min', n: 1}]},
+  {id: 'dns', title: 'DNS (Technitium)', fields: [
+    {k: 'dns.api_url', l: 'URL da API'},
+    {k: 'dns.zone', l: 'Zona'},
+    {k: 'dns.ttl', l: 'TTL do registo', u: 's', n: 1}]},
+  {id: 'kuma', title: 'Uptime Kuma', fields: [
+    {k: 'kuma.base_url', l: 'URL', h: 'Vazio desliga os avisos para o Kuma.'},
+    {k: 'kuma.heartbeat_token', l: 'Token do heartbeat', s: true},
+    {k: 'kuma.npm_token', l: 'Token do NPM', s: true}]},
+  {id: 'caminhos', title: 'Caminhos', locked: true, fields: [
+    {k: 'paths.mirror_subvol', l: 'Subvolume do espelho'},
+    {k: 'paths.mirror_root', l: 'Pasta dentro do espelho'},
+    {k: 'paths.snapshots_dir', l: 'Pasta dos snapshots'},
+    {k: 'paths.overrides_dir', l: 'Pasta dos overrides'},
+    {k: 'npm.dir', l: 'Pasta do NPM no espelho'}]},
+  {id: 'noturna', title: 'Descarga noturna', fields: [
+    {k: 'nightly.prepull_at', l: 'Hora', t: 'time', h: 'Descarrega as imagens dos composes do espelho. Vazio desliga.'}]},
+  {id: 'interface', title: 'Interface', fields: [
+    {k: 'ui.listen', l: 'Endereço e porta', h: 'Por exemplo 0.0.0.0:8099. Muda depois de reiniciar o agente.'}]},
+];
+const CHECKED = ['rede', 'dns', 'kuma', 'caminhos'];
+const secChecks = {}; // section → the checks shown after it was saved
+const allHome = () => st.services.every(s => s.state === 'NORMAL') && !st.tnas_npm?.snapshot;
+
+function fieldHtml(fd) {
+  const v = st.settings?.[fd.k];
+  const input = fd.s ? `<input type="password" name="${fd.k}" autocomplete="new-password" placeholder="${v ? 'Deixa vazio para manter' : 'Em falta'}">`
+    : fd.n != null ? `<input type="number" name="${fd.k}" min="${fd.n}" value="${esc(v)}">`
+    : `<input type="${fd.t || 'text'}" name="${fd.k}" value="${esc(v)}" spellcheck="false" autocomplete="off">`;
+  return `<label class="set-field" data-k="${fd.k}">
+    <span class="set-label">${esc(fd.l)}${fd.s ? chip(v ? 'Definido' : 'Em falta', v ? 'var(--success)' : 'var(--warning)', 'xs') : ''}</span>
+    <span class="set-input">${input}${fd.u ? `<span class="unit">${fd.u}</span>` : ''}</span>
+    ${fd.h ? `<small class="set-help">${esc(fd.h)}</small>` : ''}<small class="field-err" role="alert"></small></label>`;
+}
+
+function interfaceExtra() {
+  const c = st.cert || {}, run = st.ui_listen_running, saved = st.settings?.['ui.listen'];
+  return kv([['Certificado', c.names?.length ? esc(c.names.join(', ')) : '—'],
+      ['Válido até', c.not_after ? `${esc(day(c.not_after))}, renovado sozinho` : '—']])
+    + (run && saved && run !== saved ? `<div class="banner" style="--c:var(--warning)">${icon('restore')}<div>Gravado ${mono(saved)}, mas a interface ainda está em ${mono(run)}.
+        <button type="button" class="btn" data-restart>Reiniciar agora</button></div></div>` : '');
+}
+
+function sectionHtml(sec) {
+  const lock = sec.locked && !allHome();
+  return `<h2>${esc(sec.title)}</h2>
+    <form class="set-form" data-section="${sec.id}" novalidate>
+      <fieldset ${lock ? 'disabled' : ''}>${sec.fields.map(fieldHtml).join('')}</fieldset>
+      ${lock ? '<p class="note-text">Só com todos os serviços no servidor e o NPM do TNAS parado.</p>' : ''}
+      ${sec.id === 'interface' ? interfaceExtra() : ''}
+      <p class="bad-text sec-err" role="alert"></p>
+      <div class="form-foot"><button type="button" class="btn" data-reset disabled>Repor</button>
+        <button type="submit" class="btn contained" data-save disabled>Guardar</button></div>
+      <ul class="checks">${secChecks[sec.id] || ''}</ul>
+    </form>
+    ${sec.id === 'dns' ? `<div class="sec-sub">${kv([['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
+      <form id="tokenForm"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
+          <input type="password" id="dnsToken" autocomplete="off" required></label>
+        <p class="bad-text" id="tokenErr" role="alert"></p>
+        <div class="form-foot"><button type="submit" class="btn contained" id="tokenSave">Testar e gravar</button></div></form></div>` : ''}`;
+}
+
+// Settings, as a page, one card per section. A section with changes not yet
+// saved, or with the focus in it, is left alone by the 5 s refresh.
 const INTERVALS = [10, 15, 30, 60, 120, 300];
 const secs = v => v % 60 ? `${v} s` : `${v / 60} min`;
+function paintSec(id, html) {
+  const el = $(`set-${id}`), f = document.activeElement;
+  if (el.querySelector('form[data-dirty]') || (f && f !== document.body && el.contains(f))) return;
+  paint(`set-${id}`, html);
+}
+function repaintSec(id) { painted[`set-${id}`] = null; renderSettings(); }
 function renderSettings() {
+  if (!$('set-geral')) {
+    $('settingsBody').innerHTML = ['geral', ...SECTIONS.map(x => x.id), 'conta'].map(id => `<section class="card set-sec" id="set-${id}"></section>`).join('');
+  }
   const mode = pending.has('mode') ? pending.get('mode') : st.mode;
   const iv = pending.has('interval') ? pending.get('interval') : st.check_interval_s;
   const ivs = [...new Set([...INTERVALS, iv])].sort((a, b) => a - b);
-  paint('settingsBody', `
-    <section class="card set-sec" id="set-geral"><h2>Geral</h2>
+  paintSec('geral', `<h2>Geral</h2>
       <fieldset class="seg" ${pending.has('mode') ? 'disabled' : ''}><legend>Modo</legend>
         <label><input type="radio" name="mode" value="observe" ${mode === 'observe' ? 'checked' : ''}><strong>Observação</strong><small>Só regista o que faria</small></label>
         <label><input type="radio" name="mode" value="auto" ${mode === 'auto' ? 'checked' : ''}><strong>Automático</strong><small>Faz failover e regresso sozinho</small></label>
       </fieldset>
       <label class="field">Verificar o servidor a cada <select id="interval" ${pending.has('interval') ? 'disabled' : ''}>
-        ${ivs.map(v => `<option value="${v}" ${v === iv ? 'selected' : ''}>${secs(v)}</option>`).join('')}</select></label>
-    </section>
-    <section class="card set-sec" id="set-dns"><h2>DNS (Technitium)</h2>
-      <p class="note-text">O agente aponta o nome de um serviço para o TNAS quando a cópia fica pronta, e repõe-no no regresso.</p>
-      ${kv([['Zona', mono(st.dns_zone)], ['API', mono(st.dns_api_url)],
-        ['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
-      <form id="tokenForm"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
-          <input type="password" id="dnsToken" autocomplete="off" required></label>
-        <p class="bad-text" id="tokenErr" role="alert"></p>
-        <div class="form-foot"><button type="submit" class="btn contained" id="tokenSave">Testar e gravar</button></div></form>
-    </section>
-    <section class="card set-sec" id="set-conta"><h2>Conta</h2>
+        ${ivs.map(v => `<option value="${v}" ${v === iv ? 'selected' : ''}>${secs(v)}</option>`).join('')}</select></label>`);
+  SECTIONS.forEach(x => paintSec(x.id, sectionHtml(x)));
+  paintSec('conta', `<h2>Conta</h2>
       ${kv([['Utilizador', mono(st.user)]])}
-      <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>
-    </section>`);
+      <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>`);
 }
+
+// A section's form: dirty when a field differs from what the agent has.
+function formDirty(form) {
+  const sec = SECTIONS.find(x => x.id === form.dataset.section);
+  return sec.fields.some(fd => {
+    const el = form.elements[fd.k];
+    return el && (fd.s ? el.value !== '' : String(el.value) !== String(st.settings?.[fd.k] ?? ''));
+  });
+}
+function markSection(form) {
+  const d = formDirty(form);
+  form.toggleAttribute('data-dirty', d);
+  form.querySelector('[data-save]').disabled = !d;
+  form.querySelector('[data-reset]').disabled = !d;
+}
+async function saveSection(form) {
+  const id = form.dataset.section, sec = SECTIONS.find(x => x.id === id), values = {};
+  for (const fd of sec.fields) {
+    const el = form.elements[fd.k];
+    if (fd.s && !el.value) continue;
+    values[fd.k] = fd.n != null ? Number(el.value) : el.value;
+  }
+  form.querySelectorAll('.field-err, .sec-err').forEach(x => { x.textContent = ''; });
+  form.querySelector('[data-save]').disabled = true;
+  try {
+    const r = toLogin(await fetch('api/config/section', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({section: id, values})}));
+    if (r.ok) {
+      toast('Guardado');
+      form.removeAttribute('data-dirty');
+      document.activeElement?.blur();
+      secChecks[id] = CHECKED.includes(id) ? '<li class="muted">A verificar…</li>' : '';
+      await refresh();
+      repaintSec(id);
+      if (CHECKED.includes(id)) runChecks(id);
+      return;
+    }
+    const j = await r.json().catch(() => ({}));
+    const at = j.field && form.querySelector(`[data-k="${CSS.escape(j.field)}"] .field-err`);
+    if (at) at.textContent = sentence(j.error);
+    else form.querySelector('.sec-err').textContent = sentence(j.error || `HTTP ${r.status}`);
+  } catch (err) {
+    form.querySelector('.sec-err').textContent = sentence(err.message);
+  }
+  form.querySelector('[data-save]').disabled = false;
+}
+// After a save: the section's checks, as warnings that never undo it.
+async function runChecks(id) {
+  let list = [];
+  try {
+    const r = toLogin(await fetch('api/config/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: id})}));
+    if (r.ok) list = await r.json();
+  } catch {}
+  secChecks[id] = list.map(c => `<li class="${c.ok ? 'ok-text' : 'warn-text'}">${icon(c.ok ? 'check' : 'alert')}<span>${esc(sentence(c.msg))}</span></li>`).join('');
+  repaintSec(id);
+}
+// Restart for a new address: Docker starts the agent again; open it where it now listens.
+async function restartAgent() {
+  const port = String(st.settings['ui.listen']).split(':').pop();
+  const target = `https://${location.hostname}:${port}`;
+  if (!await confirmAction('Reiniciar o agente?', `A interface volta em ${target}. Uma verificação em curso acaba primeiro.`, 'Reiniciar')) return;
+  const r = toLogin(await fetch('api/restart', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}));
+  if (!r.ok) { toast(`Não foi possível: ${(await r.text()).trim()}`, false); return; }
+  toast('A reiniciar…');
+  await new Promise(res => setTimeout(res, 3000));
+  for (const end = Date.now() + 90e3; Date.now() < end; await new Promise(res => setTimeout(res, 2000))) {
+    try { await fetch(`${target}/healthz`, {mode: 'no-cors', cache: 'no-store'}); location.href = `${target}/${location.hash}`; return; } catch {}
+  }
+  toast(`O agente não voltou em 90 s. Tenta abrir ${target}`, false);
+}
+document.addEventListener('input', e => { const f = e.target.closest('form.set-form'); if (f) markSection(f); });
+document.addEventListener('submit', e => {
+  const f = e.target.closest('form.set-form');
+  if (!f) return;
+  e.preventDefault();
+  saveSection(f);
+});
+document.addEventListener('click', e => {
+  const reset = e.target.closest('[data-reset]');
+  if (reset) {
+    const f = reset.closest('form.set-form');
+    f.removeAttribute('data-dirty');
+    document.activeElement?.blur();
+    repaintSec(f.dataset.section);
+    return;
+  }
+  if (e.target.closest('[data-restart]')) restartAgent();
+});
+addEventListener('beforeunload', e => { if (document.querySelector('form.set-form[data-dirty]')) e.preventDefault(); });
 
 function renderPanel() {
   if (!panel || !st) return;
@@ -1196,8 +1385,8 @@ document.addEventListener('change', async e => {
     const mode = e.target.value;
     if (mode === 'auto' && !await confirmAction('Passar para automático?',
       'O agente passa a fazer failover e regresso sozinho, sem pedir confirmação.', 'Passar para automático')) {
-      painted.settingsBody = null; // put the radio back on what the agent has
-      renderSettings();
+      e.target.blur();
+      repaintSec('geral'); // put the radio back on what the agent has
       return;
     }
     post('api/config', {mode}, mode === 'auto' ? 'Modo automático ligado' : 'Modo observação ligado', 'mode', mode);
