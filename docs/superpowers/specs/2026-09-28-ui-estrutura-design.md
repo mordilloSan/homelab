@@ -70,7 +70,7 @@ histórico · manter todas as animações.
   - **DNS**: o que está hoje no painel (zona, API, estado do token, formulário
     do token).
   - **Conta**: utilizador e **Mudar password**.
-- Grava ao mudar, com o aviso "Guardado". Passar para **Automático** pede
+- Grava ao mudar, com um aviso que diz o que ficou ("Modo automático ligado", "Verificação a cada 30 s"). Passar para **Automático** pede
   confirmação ("O agente passa a fazer failover e regresso sozinho");
   voltar a Observação não.
 - As secções das partes B e C não aparecem até existirem.
