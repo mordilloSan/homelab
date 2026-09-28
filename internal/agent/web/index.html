@@ -284,12 +284,19 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 16px; }
 .form-foot .note { margin-right: auto; color: var(--warning); font-size: 12px; }
 
-.timeline { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow-y: auto; }
-.ev { --c: var(--neutral); display: grid; grid-template-columns: 14px 1fr; gap: 12px; padding: 10px 0; }
+.timeline { list-style: none; margin: 0; padding: 0; }
+.ev { --c: var(--neutral); display: grid; grid-template-columns: 14px 96px 120px minmax(0, 1fr); gap: 12px; padding: 9px 4px; align-items: start; }
+.ev time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12.5px; white-space: nowrap; }
+.ev-svc { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev.err p { color: var(--error); }
+.sheet .ev { grid-template-columns: 14px 96px minmax(0, 1fr); }
+.ev-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ev-filters input { flex: 1; min-width: 180px; max-width: 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well); }
+#evMore { display: flex; justify-content: center; padding-top: 12px; }
+#evMore:empty { display: none; }
 .ev + .ev { border-top: 1px solid var(--divider); }
 .ev-dot { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--c);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--c), transparent 80%); }
-.ev-meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; color: var(--muted); font-size: 12px; }
 .ev { border-radius: 8px; }
 .ev.fresh { animation: fresh 2s ease-out; }
 @keyframes fresh { from { background: color-mix(in srgb, var(--c), transparent 82%); transform: translateY(-6px); } 30% { transform: none; } }
@@ -357,6 +364,8 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 .note-text { color: var(--muted) !important; font-size: 12.5px; margin-top: 8px; }
 
 @media (max-width: 860px) {
+  .ev, .sheet .ev { grid-template-columns: 14px auto minmax(0, 1fr); row-gap: 2px; }
+  .ev p { grid-column: 2 / -1; }
   .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; justify-content: space-around;
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--paper); border-top: 1px solid var(--divider); }
   .tabs a { flex-direction: column; gap: 2px; padding: 6px 12px; font-size: 11.5px; }
@@ -868,30 +877,73 @@ function renderServices() {
 function evTone(m) {
   if (/^ERRO/.test(m)) return 'var(--error)';
   if (/^\[observação\]/.test(m)) return 'var(--neutral)';
-  if (/inacessível|falha|por concluir|por parar|manutenção/.test(m)) return 'var(--warning)';
+  if (/inacessível|sem internet|falha|por concluir|por parar|manutenção/.test(m)) return 'var(--warning)';
   if (/de volta|recuperou|voltou|acessível|descarregadas|todas as imagens/.test(m)) return 'var(--success)';
   if (/failover|regresso|TNAS/.test(m)) return 'var(--info)';
   return 'var(--neutral)';
 }
-const evItem = (e, fresh = false, withSvc = true) => `<li class="ev ${fresh ? 'fresh' : ''}" style="--c:${evTone(e.msg)}"><span class="ev-dot"></span><div>
-    <p>${esc(cap(e.msg))}</p>
-    <div class="ev-meta">${withSvc && e.svc ? chip(e.svc, 'var(--neutral)', 'xs') : ''}<time datetime="${esc(e.t)}" title="${esc(when(e.t))}">${esc(ago(e.t))}</time></div>
-  </div></li>`;
+const evItem = (e, fresh = false, withSvc = true) => `<li class="ev ${fresh ? 'fresh' : ''} ${/^ERRO/.test(e.msg) ? 'err' : ''}" style="--c:${evTone(e.msg)}">
+    <span class="ev-dot"></span>
+    <time datetime="${esc(e.t)}" title="${esc(when(e.t))}">${esc(evWhen(e.t))}</time>
+    ${withSvc ? `<span class="ev-svc">${esc(e.svc || 'global')}</span>` : ''}
+    <p>${esc(cap(e.msg))}</p></li>`;
 
-let seen = null; // events already on screen; the ones that arrive later flash in
+// Every event (30 days) is fetched once, when the tab or a service panel
+// first needs it; after that the ones in each status are merged on top.
+let evAll = null, evShown = 100, seen = null, evLoading = false;
+const evKey = e => e.t + e.svc + e.msg;
+async function loadEvents() {
+  if (evAll || evLoading) return;
+  evLoading = true;
+  try {
+    const r = toLogin(await fetch('api/events', {cache: 'no-store'}));
+    if (r.ok) { evAll = await r.json(); if (st) renderAll(); }
+  } finally { evLoading = false; }
+}
+function mergeEvents() {
+  if (!evAll) return;
+  const known = new Set(evAll.map(evKey));
+  const add = (st.events || []).filter(e => !known.has(evKey(e))).reverse();
+  if (add.length) evAll = [...add, ...evAll];
+}
+// newest first, from whichever list is loaded
+const eventsNow = () => evAll || [...(st.events || [])].reverse();
+
+const evWhen = t => {
+  const d = new Date(t), today = new Date(), y = new Date(today - 864e5);
+  const hm = d.toLocaleTimeString('pt-PT', {hour: '2-digit', minute: '2-digit'});
+  if (d.toDateString() === today.toDateString()) return `hoje ${hm}`;
+  if (d.toDateString() === y.toDateString()) return `ontem ${hm}`;
+  return `${d.toLocaleDateString('pt-PT', {day: '2-digit', month: '2-digit'})} ${hm}`;
+};
+
 function renderEvents() {
-  const all = st.events || [];
-  const key = e => e.t + e.msg;
-  const evs = all.slice(-80).reverse();
-  $('evCount').textContent = evs.length ? `últimos ${evs.length}` : '';
-  paint('events', evs.length ? evs.map(e => evItem(e, seen && !seen.has(key(e)) && !reduceMotion.matches)).join('')
-    : '<li class="empty">Ainda sem eventos. As falhas, os failovers e os regressos aparecem aqui.</li>');
-  seen = new Set(all.map(key));
+  mergeEvents();
+  if (currentTab() !== 'events') { seen = null; return; } // back on the tab, nothing flashes as new
+  const f = $('evSvc')?.value ?? '', rawQ = $('evQuery')?.value ?? '', q = norm(rawQ.trim());
+  const names = [...new Set([...st.services.map(s => s.name), ...eventsNow().map(e => e.svc).filter(Boolean)])];
+  const opts = `<option value="">Todos os serviços</option><option value="-">Global</option>${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}`;
+  if (painted.evOpts !== opts) {
+    painted.evOpts = opts;
+    paint('evFilters', `<select id="evSvc" aria-label="Serviço">${opts}</select>
+      <input type="search" id="evQuery" placeholder="Procurar nos eventos…" aria-label="Procurar nos eventos">`);
+    $('evSvc').value = f;
+    $('evQuery').value = rawQ;
+  }
+  const all = eventsNow();
+  const match = all.filter(e => (!f || (f === '-' ? !e.svc : e.svc === f)) && (!q || norm(e.msg).includes(q) || norm(e.svc).includes(q)));
+  const evs = match.slice(0, evShown);
+  $('evCount').textContent = `${match.length} ${match.length === 1 ? 'evento' : 'eventos'} · 30 dias`;
+  paint('events', evs.length ? evs.map(e => evItem(e, seen && !seen.has(evKey(e)) && !reduceMotion.matches)).join('')
+    : `<li class="empty">${all.length ? 'Nenhum evento com esse filtro.' : 'Ainda sem eventos. As falhas, os failovers e os regressos aparecem aqui.'}</li>`);
+  paint('evMore', match.length > evShown ? `<button class="btn" id="evMoreBtn">Carregar mais</button>` : '');
+  seen = new Set(all.map(evKey));
 }
 
 // Details sheet: opened from a node, a pill or a card title; redrawn on every refresh while open.
 let panel = null;
 function openPanel(kind, name) {
+  if (kind === 'svc') loadEvents();
   panel = {kind, name};
   painted.panelHead = painted.panelBody = painted.panelFoot = null;
   renderPanel();
@@ -971,7 +1023,7 @@ function minuteSelect(s, field, min) {
 function svcPanel(s) {
   if (!s) return {head: '', body: ''};
   const S = look(s);
-  const events = (st.events || []).filter(e => e.svc === s.name).slice(-25).reverse();
+  const events = eventsNow().filter(e => e.svc === s.name).slice(0, 25);
   return {
     head: `<span class="svc-icon" style="--accent:${S.c}">${icon(SVC_ICON[s.name])}</span>
       <div class="node-id"><h2 id="panelTitle">${esc(s.name)}</h2>${mono(s.host)}</div>${chip(S.label, S.c, S.busy ? 'busy' : '')}`,
@@ -1200,6 +1252,12 @@ document.addEventListener('submit', async e => {
 });
 $('pwBannerBtn').addEventListener('click', openPw);
 $('svcSearch').addEventListener('input', renderServices);
+document.addEventListener('input', e => {
+  if (e.target.id === 'evQuery' || e.target.id === 'evSvc') { evShown = 100; renderEvents(); }
+});
+document.addEventListener('click', e => {
+  if (e.target.id === 'evMoreBtn') { evShown += 100; renderEvents(); }
+});
 $('pwCancel').addEventListener('click', () => $('pwDlg').close());
 $('pwForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1232,6 +1290,7 @@ function route() {
   document.querySelectorAll('.page').forEach(p => { p.hidden = p.id !== `page-${tab}`; });
   document.querySelectorAll('[data-tab]').forEach(a => a.dataset.tab === tab ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
   document.querySelectorAll('[data-sub]').forEach(a => tab === 'settings' && a.dataset.sub === sub ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current'));
+  if (tab === 'events') loadEvents();
   if (st) renderAll();
   if (tab === 'settings') $(`set-${sub}`)?.scrollIntoView({block: 'start'});
   if (tab === 'overview') requestAnimationFrame(() => st && renderWires()); // it had no size while hidden
