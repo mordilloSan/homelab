@@ -257,7 +257,7 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 func (a *Agent) postSetupDone(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.st.SetupDone = true
+	a.st.SetupPending = false
 	a.now = time.Now()
 	a.done(w, "", "configuração inicial concluída")
 }

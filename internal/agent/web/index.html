@@ -1009,6 +1009,7 @@ function renderEvents() {
   const all = eventsNow();
   const match = all.filter(e => (!f || (f === '-' ? !e.svc : e.svc === f)) && (!q || norm(e.msg).includes(q) || norm(e.svc).includes(q)));
   evMatch = match;
+  if ($('evExport')) { $('evExport').disabled = !evAll; $('evExport').title = evAll ? 'Os eventos deste filtro, para abrir numa folha de cálculo' : 'A carregar o histórico…'; }
   const evs = match.slice(0, evShown);
   $('evCount').textContent = `${match.length} ${match.length === 1 ? 'evento' : 'eventos'} · 30 dias`;
   paint('events', evs.length ? evs.map(e => evItem(e, seen && !seen.has(evKey(e)) && !reduceMotion.matches)).join('')
@@ -1316,7 +1317,8 @@ const secs = v => v % 60 ? `${v} s` : `${v / 60} min`;
 // left alone by the refresh.
 function paintGuarded(elId, html) {
   const el = $(elId), f = document.activeElement;
-  if (el.querySelector('form[data-dirty]') || [...el.querySelectorAll('.dns-token')].some(x => x.value) || (f && f !== document.body && el.contains(f))) return;
+  const typing = f && el.contains(f) && f.matches('input, select, textarea'); // a button keeps the focus after a dialog: no reason to wait
+  if (el.querySelector('form[data-dirty]') || [...el.querySelectorAll('.dns-token')].some(x => x.value) || typing) return;
   paint(elId, html);
 }
 const paintSec = (id, html) => paintGuarded(`set-${id}`, html);
@@ -1384,11 +1386,23 @@ function renderWizard() {
   $('wizNext').textContent = i === WIZ.length - 1 ? 'Concluir' : 'Seguinte';
   $('wizPos').textContent = `Passo ${i + 1} de ${WIZ.length}`;
 }
-$('wizPrev').addEventListener('click', () => { const i = wizIndex(); if (i > 0) location.hash = `#/assistente/${WIZ[i - 1].id}`; });
+// Leaving a step with changes not saved asks first, whichever way: the step
+// list, Anterior, Seguinte or Continuar mais tarde.
+const wizDirty = () => !!document.querySelector('#wiz-body form[data-dirty]') || [...document.querySelectorAll('#wiz-body .dns-token')].some(x => x.value);
+const wizLeave = () => !wizDirty() || confirmAction('Sair sem gravar?', 'Há alterações neste passo que ainda não gravaste; perdem-se.', 'Sair');
+$('page-setup').addEventListener('click', async e => {
+  const link = e.target.closest('a[href^="#"]');
+  if (!link || !wizDirty()) return;
+  e.preventDefault();
+  if (await wizLeave()) { document.querySelector('#wiz-body form[data-dirty]')?.removeAttribute('data-dirty'); location.hash = link.getAttribute('href'); }
+});
+$('wizPrev').addEventListener('click', async () => {
+  const i = wizIndex();
+  if (i > 0 && await wizLeave()) location.hash = `#/assistente/${WIZ[i - 1].id}`;
+});
 $('wizNext').addEventListener('click', async () => {
   const i = wizIndex();
-  if ((document.querySelector('#wiz-body form[data-dirty]') || [...document.querySelectorAll('#wiz-body .dns-token')].some(x => x.value))
-    && !await confirmAction('Seguir sem gravar?', 'Há alterações neste passo que ainda não gravaste; perdem-se.', 'Seguir')) return;
+  if (!await wizLeave()) return;
   if (i < WIZ.length - 1) { location.hash = `#/assistente/${WIZ[i + 1].id}`; return; }
   try {
     const r = toLogin(await fetch('api/setup/done', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}));
@@ -1699,7 +1713,8 @@ document.addEventListener('click', e => {
 // Exports what the filter shows (all of it, not only the rows drawn), as CSV
 // with ; and a BOM, which a Portuguese Excel opens as columns.
 function exportEvents() {
-  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  // a cell Excel would read as a formula (=, +, -, @) gets a ' first: messages carry outside text
+  const q = v => `"${String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
   const rows = evMatch.map(e => [new Date(e.t).toLocaleString('sv-SE'), e.svc || 'global', e.msg].map(q).join(';'));
   const csv = '\ufeff' + ['"data";"serviço";"mensagem"', ...rows].join('\r\n') + '\r\n';
   const a = document.createElement('a');

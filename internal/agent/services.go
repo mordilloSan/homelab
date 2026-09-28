@@ -77,9 +77,15 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	// The icon's link is downloaded before the lock: it may take seconds.
+	// The icon's link is downloaded before the lock: it may take seconds. The
+	// same link as saved, with its icon kept, is not asked again: a link gone
+	// down must not stop the service from being edited.
+	a.mu.Lock()
+	prev, _ := a.service(req.Name)
+	a.mu.Unlock()
 	var iconBytes []byte
-	if req.Icon = strings.TrimSpace(req.Icon); req.Icon != "" {
+	req.Icon = strings.TrimSpace(req.Icon)
+	if req.Icon != "" && (req.Icon != prev.Icon || a.iconV(req.Name) == "") {
 		if !isURL(req.Icon) {
 			fieldErr(w, "icon", "tem de ser um link http:// ou https:// para uma imagem")
 			return

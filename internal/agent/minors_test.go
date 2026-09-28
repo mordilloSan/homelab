@@ -173,3 +173,12 @@ func TestDotFolderRefused(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// mirror_root "." (the subvolume itself) still loads; only service and NPM folders must be below it.
+func TestMirrorRootDot(t *testing.T) {
+	base, _ := LoadConfig("config/failover.yml")
+	base.Paths.MirrorRoot = "."
+	if err := base.validate(); err != nil {
+		t.Fatal(err)
+	}
+}

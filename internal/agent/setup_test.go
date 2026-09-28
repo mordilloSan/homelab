@@ -20,7 +20,7 @@ func TestSetupGuide(t *testing.T) {
 	if v := string(*a.view.Load()); !strings.Contains(v, `"setup_pending":false`) {
 		t.Fatal("concluído, mas continua pendente")
 	}
-	if b, _ := os.ReadFile(a.statePath); !strings.Contains(string(b), `"setup_done": true`) {
+	if b, _ := os.ReadFile(a.statePath); strings.Contains(string(b), "setup_pending") {
 		t.Fatalf("não ficou gravado: %s", b)
 	}
 
@@ -29,5 +29,17 @@ func TestSetupGuide(t *testing.T) {
 	old := newTestAgent(t, dir, &fake{noPing: map[string]bool{}, down: map[string]bool{}})
 	if v := string(*old.view.Load()); !strings.Contains(v, `"setup_pending":false`) {
 		t.Fatal("uma instalação que já existia pede o assistente")
+	}
+}
+
+// Left for later and the agent restarted: the guide is still pending.
+func TestSetupGuideSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	f := &fake{noPing: map[string]bool{}, down: map[string]bool{}}
+	a := newTestAgent(t, dir, f)
+	a.save()
+	again := newTestAgent(t, dir, f)
+	if v := string(*again.view.Load()); !strings.Contains(v, `"setup_pending":true`) {
+		t.Fatal("depois de reiniciar, o assistente desapareceu")
 	}
 }

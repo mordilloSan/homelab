@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -78,5 +80,38 @@ func TestServiceIconGuess(t *testing.T) {
 	}
 	if got := iconType(svgIcon); got != "image/svg+xml" {
 		t.Fatalf("svg: %s", got)
+	}
+}
+
+// A link that went down does not stop the service from being edited: the
+// stored icon stays.
+func TestServiceIconLinkDown(t *testing.T) {
+	a, f := svcSetup(t)
+	f.bodies = map[string][]byte{"https://example.com/nc.png": pngIcon}
+	body := strings.Replace(nextcloud, `"icon":""`, `"icon":"https://example.com/nc.png"`, 1)
+	if code, got := postTo(t, a.postService, body); code != 204 {
+		t.Fatalf("HTTP %d %s", code, got)
+	}
+	delete(f.bodies, "https://example.com/nc.png")
+	f.getErr = map[string]error{"https://example.com/": errors.New("timeout")}
+	edit := strings.Replace(strings.Replace(body, `"new":true,`, "", 1), `"wait_min":5`, `"wait_min":15`, 1)
+	if code, got := postTo(t, a.postService, edit); code != 204 {
+		t.Fatalf("editar com o link em baixo: HTTP %d %s", code, got)
+	}
+	if !fileExists(filepath.Join(a.iconDir(), "nextcloud")) {
+		t.Fatal("o ícone guardado desapareceu")
+	}
+}
+
+// A background pass started before a service was removed does not bring its
+// icon back.
+func TestIconPassAfterRemove(t *testing.T) {
+	a, f := setup(t)
+	f.bodies = map[string][]byte{iconsCDN + "svg/vaultwarden.svg": svgIcon}
+	stale := slices.Clone(a.cfg.Services)
+	a.cfg.Services = a.cfg.Services[1:] // vaultwarden removed meanwhile
+	a.fetchIconsFrom(stale)
+	if fileExists(filepath.Join(a.iconDir(), "vaultwarden")) {
+		t.Fatal("o ícone de um serviço removido voltou")
 	}
 }

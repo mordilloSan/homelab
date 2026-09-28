@@ -87,6 +87,7 @@ func (a *Agent) storeIcon(name string, srcs []string, b []byte) {
 	defer a.iconMu.Unlock()
 	dir, src := a.iconDir(), strings.Join(srcs, " ")
 	err := os.MkdirAll(dir, 0o755)
+	chownLikeDir(dir) // the state folder's owner, not root
 	if b == nil {
 		src = iconMissed + src
 		_ = os.Remove(filepath.Join(dir, name))
@@ -119,6 +120,21 @@ func (a *Agent) fetchIcons() {
 	a.mu.Lock()
 	svcs := slices.Clone(a.cfg.Services)
 	a.mu.Unlock()
+	a.fetchIconsFrom(svcs)
+}
+
+// fetchIconsFrom works on a copy of the services, one pass at a time. Before
+// keeping an icon it checks the service is still there with the same sources:
+// a link saved, or the service removed, during the pass wins over it.
+func (a *Agent) fetchIconsFrom(svcs []Service) {
+	a.iconPass.Lock()
+	defer a.iconPass.Unlock()
+	current := func(sv Service, srcs []string) bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		now, ok := a.service(sv.Name)
+		return ok && slices.Equal(iconSources(now), srcs)
+	}
 	for _, sv := range svcs {
 		srcs := iconSources(sv)
 		src := filepath.Join(a.iconDir(), sv.Name+".src")
@@ -136,7 +152,9 @@ func (a *Agent) fetchIcons() {
 			continue
 		}
 		b, _ := a.downloadIcon(srcs)
-		a.storeIcon(sv.Name, srcs, b)
+		if current(sv, srcs) {
+			a.storeIcon(sv.Name, srcs, b)
+		}
 	}
 	a.mu.Lock()
 	a.publish()
@@ -165,7 +183,7 @@ func (a *Agent) getIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", iconType(b))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox")
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	_, _ = w.Write(b)
 }

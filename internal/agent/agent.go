@@ -137,7 +137,7 @@ func (c *Config) validate() error {
 		{!isIP(c.RouterIP), "router_ip", "tem de ser um endereço IP"},
 		{strings.ContainsAny(c.LANIface, " /\t"), "lan_iface", "tem de ser o nome de uma interface, sem espaços"},
 		{!filepath.IsAbs(c.Paths.MirrorSubvol), "paths.mirror_subvol", "tem de ser um caminho absoluto"},
-		{c.Paths.MirrorRoot != "" && !isRel(c.Paths.MirrorRoot), "paths.mirror_root", "tem de ser uma pasta dentro do espelho"},
+		{c.Paths.MirrorRoot != "" && c.Paths.MirrorRoot != "." && !isRel(c.Paths.MirrorRoot), "paths.mirror_root", "tem de ser uma pasta dentro do espelho"},
 		{!filepath.IsAbs(c.Paths.SnapshotsDir), "paths.snapshots_dir", "tem de ser um caminho absoluto"},
 		{c.Paths.OverridesDir != "" && !filepath.IsAbs(c.Paths.OverridesDir), "paths.overrides_dir", "tem de ser um caminho absoluto"},
 		{!isRel(c.NPM.Dir), "npm.dir", "tem de ser uma pasta dentro do espelho"},
@@ -282,14 +282,14 @@ type State struct {
 		OK       bool      `json:"ok"`
 		Msg      string    `json:"msg,omitempty"`
 	} `json:"tnas_npm"`
-	MaintUntil time.Time            `json:"maint_until,omitzero"`
-	LastPull   string               `json:"last_pull,omitempty"`
-	Images     map[string]Stack     `json:"images,omitempty"` // by service; "npm" is the TNAS NPM
-	ImagesAt   time.Time            `json:"images_at,omitzero"`
-	ImagesMsg  string               `json:"images_msg,omitempty"`
-	Services   map[string]*SvcState `json:"services"`
-	Events     []Event              `json:"events,omitempty"`     // only read: moved to events.jsonl on start
-	SetupDone  bool                 `json:"setup_done,omitempty"` // the first-start guide was finished (or the install predates it)
+	MaintUntil   time.Time            `json:"maint_until,omitzero"`
+	LastPull     string               `json:"last_pull,omitempty"`
+	Images       map[string]Stack     `json:"images,omitempty"` // by service; "npm" is the TNAS NPM
+	ImagesAt     time.Time            `json:"images_at,omitzero"`
+	ImagesMsg    string               `json:"images_msg,omitempty"`
+	Services     map[string]*SvcState `json:"services"`
+	Events       []Event              `json:"events,omitempty"`        // only read: moved to events.jsonl on start
+	SetupPending bool                 `json:"setup_pending,omitempty"` // a new install whose first-start guide is not finished; an older state lacks it: done
 }
 
 // System is every side effect the agent has, so tests can replace it.
@@ -323,7 +323,8 @@ type Agent struct {
 	certs      atomic.Pointer[certStore]
 	iconMu     sync.Mutex        // guards iconRev and the icon files; never held while taking mu
 	iconRev    map[string]string // service → version of its stored icon, for the page's cache
-	iconJobs   sync.WaitGroup    // fetchIcons in the background (tests wait for it) // set when the UI serves TLS
+	iconJobs   sync.WaitGroup    // fetchIcons in the background (tests wait for it)
+	iconPass   sync.Mutex        // one fetchIcons pass at a time // set when the UI serves TLS
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool
@@ -347,9 +348,10 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 		if err = json.Unmarshal(b, &a.st); err != nil {
 			return nil, fmt.Errorf("estado %s corrompido: %w", statePath, err)
 		}
-		a.st.SetupDone = true // a state already there: an install in use, which needs no guide
 	case !errors.Is(err, fs.ErrNotExist):
 		return nil, err
+	default:
+		a.st.SetupPending = true // no state yet: a new install, which gets the guide
 	}
 	if a.st.Services == nil {
 		a.st.Services = map[string]*SvcState{}
@@ -1058,7 +1060,12 @@ func (a *Agent) scanImages() {
 		a.rescan.Store(true) // the one running has the old config: go again when it ends
 		return
 	}
-	defer a.scanning.Store(false)
+	defer func() {
+		a.scanning.Store(false)
+		if a.rescan.Swap(false) { // asked for just as this one ended
+			go a.scanImages()
+		}
+	}()
 	for {
 		a.scanOnce()
 		if !a.rescan.Swap(false) {
@@ -1254,7 +1261,7 @@ func (a *Agent) publish() {
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
-		settingsView(&a.cfg), !a.st.SetupDone, a.listening, certView{names, notAfter},
+		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},
 	})
 	a.view.Store(&b)
 }
