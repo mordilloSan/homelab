@@ -36,6 +36,7 @@ type Service struct {
 	StabilityMin  int    `yaml:"stability_min" json:"stability_min"`
 	Override      string `yaml:"override,omitempty" json:"override,omitempty"`
 	RequireFreeIP string `yaml:"require_free_ip,omitempty" json:"require_free_ip,omitempty"`
+	Icon          string `yaml:"icon,omitempty" json:"icon,omitempty"` // one of the page's icons; empty: by name, or a cube
 }
 
 type Config struct {
@@ -159,7 +160,7 @@ func (c *Config) validate() error {
 	seen := map[string]bool{"npm": true}
 	for _, s := range c.Services {
 		if err := c.validateService(s, seen); err != nil {
-			return err
+			return fmt.Errorf("serviço %s: %w", s.Name, err)
 		}
 		seen[s.Name] = true
 	}
@@ -167,13 +168,24 @@ func (c *Config) validate() error {
 }
 
 func (c *Config) validateService(s Service, seen map[string]bool) error {
-	switch {
-	case !validName.MatchString(s.Name) || seen[s.Name] || s.Dir == "" || s.Host == "":
-		return fmt.Errorf("serviço inválido ou repetido: %q", s.Name)
-	case s.WaitMin < 1 || s.StabilityMin < 0:
-		return fmt.Errorf("%s: wait_min tem de ser >= 1 e stability_min >= 0", s.Name)
-	case s.RequireFreeIP != "" && c.LANIface == "":
-		return fmt.Errorf("%s: require_free_ip precisa de lan_iface", s.Name)
+	for _, r := range []struct {
+		bad        bool
+		field, msg string
+	}{
+		{s.Name == "npm", "name", "npm está reservado para o NPM do TNAS"},
+		{!validName.MatchString(s.Name), "name", "só minúsculas, números, - e _, a começar por letra ou número"},
+		{seen[s.Name], "name", "já existe um serviço com este nome"},
+		{!isRel(s.Dir), "dir", "tem de ser uma pasta dentro do espelho"},
+		{!isName(s.Host), "host", "tem de ser um nome, sem https:// nem /"},
+		{s.WaitMin < 1, "wait_min", "tem de ser pelo menos 1"},
+		{s.StabilityMin < 0, "stability_min", "não pode ser negativa"},
+		{s.RequireFreeIP != "" && !isIP(s.RequireFreeIP), "require_free_ip", "tem de ser um endereço IP"},
+		{s.RequireFreeIP != "" && c.LANIface == "", "require_free_ip", "precisa da interface da LAN (Definições → Rede)"},
+		{!validIcon.MatchString(s.Icon), "icon", "ícone desconhecido"},
+	} {
+		if r.bad {
+			return fe(r.field, r.msg)
+		}
 	}
 	return nil
 }
@@ -1151,10 +1163,11 @@ func (a *Agent) publish() {
 	type svcView struct {
 		Service
 		*SvcState
+		KumaToken bool `json:"kuma_token"` // set or not; the token never leaves the agent
 	}
 	svcs := make([]svcView, 0, len(a.cfg.Services))
 	for _, sv := range a.cfg.Services {
-		svcs = append(svcs, svcView{sv, a.svc(sv.Name)})
+		svcs = append(svcs, svcView{sv, a.svc(sv.Name), a.cfg.Kuma.ServiceTokens[sv.Name] != ""})
 	}
 	names, notAfter := a.CertInfo()
 	a.evMu.Lock()
