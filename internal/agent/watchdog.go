@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -90,12 +92,16 @@ func (a *Agent) die(why string) {
 
 // crashed alerts, at the start, that the last run ended without being asked to.
 func (a *Agent) crashed() {
-	msg := "o agente reiniciou depois de parar sem ser pedido"
+	const msg = "o agente reiniciou depois de parar sem ser pedido"
+	full := msg
 	a.evMu.Lock()
-	if n := len(a.events); n > 0 {
-		e := a.events[n-1]
-		msg += fmt.Sprintf("; último evento, %s: %s", e.T.Local().Format("02/01 15:04"), e.Msg)
+	// the last that is not itself a restart: two in a row would nest
+	for _, e := range slices.Backward(a.events) {
+		if !strings.HasPrefix(e.Msg, msg) {
+			full += fmt.Sprintf("; último evento, %s: %s", e.T.Local().Format("02/01 15:04"), e.Msg)
+			break
+		}
 	}
 	a.evMu.Unlock()
-	a.alert("", msg)
+	a.alert("", full)
 }
