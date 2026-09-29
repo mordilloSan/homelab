@@ -29,11 +29,8 @@ func (a *Agent) getMirror(w http.ResponseWriter, _ *http.Request) {
 	npm := a.cfg.NPM.Dir
 	a.mu.Unlock()
 	out := []mirrorDir{}
-	ents, _ := os.ReadDir(root) // sorted by name; unreadable is an empty list
-	for _, e := range ents {
-		if e.IsDir() && e.Name() != npm && fileExists(filepath.Join(root, e.Name(), "docker-compose.yml")) {
-			out = append(out, mirrorDir{e.Name()})
-		}
+	for _, d := range mirrorDirs(root, npm) {
+		out = append(out, mirrorDir{d})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

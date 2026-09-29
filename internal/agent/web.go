@@ -47,6 +47,8 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("POST /api/restart", a.postRestart)
 	mux.HandleFunc("POST /api/setup/done", a.postSetupDone)
 	mux.HandleFunc("GET /api/mirror", a.getMirror)
+	mux.HandleFunc("GET /api/discover", a.getDiscover)
+	mux.HandleFunc("POST /api/technitium/login", a.postTechnitiumLogin)
 	mux.HandleFunc("GET /icons/{name}", a.getIcon)
 	mux.HandleFunc("GET /api/service/override", a.getServiceOverride)
 	mux.HandleFunc("POST /api/service", a.postService)

@@ -118,11 +118,19 @@ networks:
   e2e-tnas: {external: true}
 EOF
 printf 'nginx.test {\n\ttls internal\n\trespond "tnas" 200\n}\n' >"$m/npm/Caddyfile"
+# what the real NPM writes for each proxy host, read by the discovery
+ph=$m/npm/data/nginx/proxy_host
+mkdir -p "$ph"
+# shellcheck disable=SC2016 # the $ are nginx's, written as they are
+printf 'server {\n  set $forward_scheme http;\n  set $server "npm";\n  set $port 81;\n  server_name nginx.test;\n}\n' >"$ph/0.conf"
 svc_config=""
 for s in "${services[@]}"; do
 	read -r name host wait stab opt <<<"$s"
 	mkdir -p "$m/$name/html"
 	printf '%s {\n\ttls internal\n\treverse_proxy %s:80\n}\n' "$host" "$name" >>"$m/npm/Caddyfile"
+	n=$((${n:-0} + 1))
+	# shellcheck disable=SC2016 # nginx's $, as the NPM writes them
+	printf 'server {\n  set $forward_scheme http;\n  set $server "%s";\n  set $port 80;\n  server_name %s;\n}\n' "$name" "$host" >"$ph/$n.conf"
 	cat >"$m/$name/docker-compose.yml" <<EOF
 services:
   $name:
@@ -135,7 +143,8 @@ EOF
 	override="" free_ip=""
 	[[ $opt == ip=* ]] && free_ip=", require_free_ip: ${opt#ip=}"
 	if [[ $opt == ml ]]; then
-		printf '  ml:\n    image: e2e/machine-learning:never-pulled\n    networks: [e2e-tnas]\n' >>"$m/$name/docker-compose.yml"
+		# asks for a GPU, like immich's: the discovery must propose leaving it off
+		printf '  ml:\n    image: e2e/machine-learning:never-pulled\n    networks: [e2e-tnas]\n    deploy: {resources: {reservations: {devices: [{capabilities: [gpu]}]}}}\n' >>"$m/$name/docker-compose.yml"
 		printf 'services:\n  ml:\n    profiles: ["disabled"]\n' >"$W/overrides/$name.override.yml"
 		override=", override: $name.override.yml"
 	fi
@@ -204,6 +213,13 @@ if ! docker exec e2e-agent failover-agent healthcheck -config "$W/config/failove
 	exit 1
 fi
 echo "ok: interface em HTTPS, http:// redireciona e o healthcheck confia no certificado"
+disc=$(curl -sfk -b "$W/cookies" "$ui/api/discover")
+if ! jq -e '(.services | map({(.dir): .}) | add) as $s | .network.npm_check_host == "nginx.test"
+	and $s.web.host == "web.test" and $s.unifi.host == "unifi.test" and ($s.web.override_yaml | test("ml:"))' <<<"$disc" >/dev/null; then
+	echo "FALHOU: a descoberta não deu os endereços, o NPM e o override: $disc"
+	exit 1
+fi
+echo "ok: descoberta: endereço de cada serviço pelo NPM do espelho e o ml com GPU desligado"
 # the ml image is never on disk: listing it would mean the override was ignored
 wait_for '(.images.web.images | length == 1 and .[0].ref == "caddy:alpine" and .[0].present and .[0].size > 0) and .images.npm.images[0].present' 60 \
 	"imagens de cada stack verificadas no TNAS, com o override aplicado (O4)"
