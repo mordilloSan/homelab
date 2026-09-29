@@ -147,6 +147,21 @@ fieldset:disabled .set-input input { opacity: .6; cursor: not-allowed; }
 .sec-err { margin-top: 12px; }
 .sec-sub { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
 .set-sec .banner { margin-top: 12px; }
+.disc-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 12.5px; }
+.disc-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 0 12px 8px 0; }
+.disc-table td { padding: 8px 12px 8px 0; border-top: 1px solid var(--divider); }
+.disc-table td:first-child { color: var(--muted); }
+.disc-new { color: var(--primary); font-weight: 600; }
+.disc-list { margin: 0 0 8px; }
+.disc-row { align-items: flex-start !important; }
+.disc-row input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.disc-row.is-done { opacity: .7; }
+.disc-notes { display: block; color: var(--warning); font-size: 11.5px; margin-top: 2px; }
+.tl-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
+.tl-row .pw-field input { width: 100%; min-width: 0; }
+.tl-row .pw-field { margin-top: 8px; }
+.tl-err:empty { display: none; }
+.form-foot .spacer { flex: 1; }
 .wiz-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
 .wiz-n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; margin-right: 8px; font-size: 11.5px;
   background: color-mix(in srgb, var(--text), transparent 88%); font-variant-numeric: tabular-nums; }
@@ -477,6 +492,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
   <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span>
     <input type="search" id="svcSearch" placeholder="Procurar serviço…" aria-label="Procurar serviço" hidden>
+    <button class="btn" data-panel="discover" aria-haspopup="dialog">Descobrir serviços</button>
     <button class="btn contained" data-panel="svcEdit" aria-haspopup="dialog">+ Adicionar serviço</button></div>
   <div class="grid" id="svcs"></div>
 
@@ -1020,9 +1036,10 @@ function renderEvents() {
 
 // Details sheet: opened from a node, a pill or a card title; redrawn on every refresh while open.
 let panel = null;
-function openPanel(kind, name) {
+function openPanel(kind, name, prefill) {
   if (kind === 'svc') loadEvents();
-  panel = {kind, name};
+  panel = {kind, name, prefill};
+  if (kind === 'discover') getDiscovery(true).then(() => { if (panel?.kind === 'discover') { painted.panelBody = null; renderPanel(); } }, () => {});
   if (kind === 'svcEdit') loadServiceForm(panel);
   painted.panelHead = painted.panelBody = painted.panelFoot = null;
   renderPanel();
@@ -1115,12 +1132,22 @@ async function loadServiceForm(p) {
 }
 const optMinutes = (v, min) => [...new Set([...MINUTES.filter(m => m >= min), v])].sort((a, b) => a - b)
   .map(m => `<option value="${m}" ${m === v ? 'selected' : ''}>${m} min</option>`).join('');
+function discoverPanel() {
+  const head = `<span class="svc-icon">${icon('layers')}</span><div class="node-id"><h2 id="panelTitle">Serviços descobertos</h2>
+    <span class="muted">As pastas do espelho, com o endereço que o NPM lhes dá</span></div>`;
+  if (!disc) return {head, body: '<p class="note-text" style="padding-top:20px">A procurar no espelho…</p>'};
+  return {head, body: `<div class="sec">${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
+    ${discListHtml(disc, false)}</div>`};
+}
+
 function svcEditPanel() {
   const s = st.services.find(x => x.name === panel.name), isNew = !s;
   const head = `<span class="svc-icon">${isNew ? icon('cube') : svcIcon(s.name)}</span>
     <div class="node-id"><h2 id="panelTitle">${isNew ? 'Novo serviço' : `Editar ${esc(s.name)}`}</h2><span class="muted">${isNew ? 'Uma pasta do espelho com docker-compose.yml' : mono(s.host)}</span></div>`;
   if (!panel.data) return {head, body: '<p class="note-text" style="padding-top:20px">A carregar…</p>'};
-  const v = s || {name: '', dir: '', host: '', wait_min: 5, stability_min: 10, icon: '', require_free_ip: ''};
+  const pre = !s && panel.prefill ? discOf(panel.prefill) : null;
+  const v = s || {name: pre?.name || '', dir: pre?.dir || '', host: pre?.host || '', wait_min: 5, stability_min: 10, icon: '', require_free_ip: pre?.require_free_ip || ''};
+  if (pre && !panel.data.override) panel.data.override = pre.override_yaml || '';
   const home = isNew || s.state === 'NORMAL';
   const dirs = panel.data.dirs.map(d => d.dir);
   if (v.dir && !dirs.includes(v.dir)) dirs.unshift(v.dir);
@@ -1149,6 +1176,7 @@ function svcEditPanel() {
       ${field('kuma_token', `Token do Kuma ${chip(s?.kuma_token ? 'Definido' : 'Em falta', s?.kuma_token ? 'var(--success)' : 'var(--neutral)', 'xs')}`,
         `<input type="password" name="kuma_token" autocomplete="new-password" placeholder="${s?.kuma_token ? 'Deixa vazio para manter' : 'Opcional'}">`, 'O monitor Push do serviço no Uptime Kuma.')}
     </fieldset></div>
+    <p class="note-text" id="svcDisc">${pre ? 'Preenchido com o que a descoberta encontrou: revê antes de adicionar.' : ''}</p>
     <p class="bad-text sec-err" id="svcErr" role="alert"></p>
   </form>`;
   const foot = `${isNew ? '' : `<button type="button" class="btn" style="--b:var(--error)" data-remove="${esc(s.name)}" ${home ? '' : 'disabled title="Só com o serviço no servidor"'}>Remover serviço</button>`}
@@ -1168,6 +1196,7 @@ async function saveService(f) {
     const r = toLogin(await fetch('api/service', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}));
     if (r.ok) {
       toast(isNew ? `Serviço ${name} adicionado` : 'Guardado');
+      forgetDiscovery();
       await refresh();
       openPanel('svc', name);
       return;
@@ -1194,6 +1223,17 @@ async function removeService(name) {
   toast(`Serviço ${name} removido`);
   refresh();
 }
+// Choosing a folder in a new service's form fills what is still empty with
+// what the discovery found for it.
+document.addEventListener('change', async e => {
+  if (e.target.name !== 'dir' || !e.target.closest('#svcForm') || panel?.name) return;
+  const f = e.target.form, x = (await getDiscovery()).services.find(y => y.dir === e.target.value);
+  if (!x) return;
+  const fill = (k, v) => { if (v && !f.elements[k].value.trim()) { f.elements[k].value = v; return true; } return false; };
+  const got = [fill('name', x.name) && 'nome', fill('host', x.host) && 'endereço', fill('override_yaml', x.override_yaml) && 'override',
+    fill('require_free_ip', x.require_free_ip) && 'IP'].filter(Boolean);
+  $('svcDisc').textContent = got.length ? `Da descoberta: ${got.join(', ')}. ${(x.notes || []).map(sentence).join(' ')}` : '';
+});
 document.addEventListener('submit', e => {
   if (e.target.id !== 'svcForm') return;
   e.preventDefault();
@@ -1298,11 +1338,13 @@ function sectionHtml(sec) {
       ${lock ? '<p class="note-text">Só com todos os serviços no servidor e o NPM do TNAS parado.</p>' : ''}
       ${sec.id === 'interface' ? interfaceExtra() : ''}
       <p class="bad-text sec-err" role="alert"></p>
-      <div class="form-foot"><button type="button" class="btn" data-reset disabled>Repor</button>
+      <div class="form-foot">${sec.id === 'rede' ? `<button type="button" class="btn" data-detect title="Preenche com o que o agente encontrou; não grava">${icon('refresh')}Detetar</button><span class="spacer"></span>` : ''}
+        <button type="button" class="btn" data-reset disabled>Repor</button>
         <button type="submit" class="btn contained" data-save disabled>Guardar</button></div>
       <ul class="checks">${secChecks[sec.id] || ''}</ul>
     </form>
-    ${sec.id === 'dns' ? `<div class="sec-sub">${kv([['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
+    ${sec.id === 'dns' ? `<div class="sec-sub"><p class="note-text">Entra com o utilizador do Technitium e o agente cria o seu token:</p>${techLoginHtml()}</div>
+    <div class="sec-sub">${kv([['Token', st.dns_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
       <form class="token-form"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
           <input type="password" class="dns-token" autocomplete="off" required></label>
         <p class="bad-text token-err" role="alert"></p>
@@ -1318,7 +1360,7 @@ const secs = v => v % 60 ? `${v} s` : `${v / 60} min`;
 function paintGuarded(elId, html) {
   const el = $(elId), f = document.activeElement;
   const typing = f && el.contains(f) && f.matches('input, select, textarea'); // a button keeps the focus after a dialog: no reason to wait
-  if (el.querySelector('form[data-dirty]') || [...el.querySelectorAll('.dns-token')].some(x => x.value) || typing) return;
+  if (el.querySelector('form[data-dirty]') || [...el.querySelectorAll('input[type=password]')].some(x => x.value) || typing) return;
   paint(elId, html);
 }
 const paintSec = (id, html) => paintGuarded(`set-${id}`, html);
@@ -1343,17 +1385,145 @@ function renderSettings() {
       <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>`);
 }
 
+// What the agent discovered (GET /api/discover): proposals only. It runs
+// docker compose on every folder of the mirror, so it is asked on demand and
+// kept a minute; saving something clears it.
+let disc = null, discAt = 0, discing = null;
+function getDiscovery(force = false) {
+  if (!force && disc && Date.now() - discAt < 60e3) return Promise.resolve(disc);
+  discing ??= fetch('api/discover', {cache: 'no-store'}).then(r => toLogin(r).json())
+    .then(d => { disc = d; discAt = Date.now(); return d; })
+    .finally(() => { discing = null; });
+  return discing;
+}
+const forgetDiscovery = () => { disc = null; };
+// the discovered service of a folder, if any
+const discOf = dir => disc?.services.find(x => x.dir === dir);
+
+// The Technitium login: the agent makes its own token with it (the password
+// is passed on, never kept). In the guide and in Definições → DNS.
+const techLoginHtml = () => `<form class="tech-login" autocomplete="on">
+    <div class="tl-row"><label class="pw-field">Utilizador do Technitium <input name="user" autocomplete="username" value="admin"></label>
+      <label class="pw-field">Password <input type="password" name="pass" autocomplete="current-password" required></label></div>
+    <p class="bad-text tl-err" role="alert"></p>
+    <div class="form-foot"><button type="submit" class="btn contained">${icon('key')}Ligar ao Technitium</button></div></form>`;
+document.addEventListener('submit', async e => {
+  const f = e.target.closest('.tech-login');
+  if (!f) return;
+  e.preventDefault();
+  const err = f.querySelector('.tl-err'), btn = f.querySelector('[type=submit]');
+  err.textContent = '';
+  btn.disabled = true;
+  try {
+    const r = toLogin(await fetch('api/technitium/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user: f.elements.user.value, pass: f.elements.pass.value})}));
+    if (!r.ok) throw new Error((await readErr(r)).error);
+    f.elements.pass.value = '';
+    document.activeElement?.blur();
+    toast('Ligado ao Technitium: o agente tem o seu token');
+    forgetDiscovery();
+    await refresh();
+    painted['wiz-body'] = null;
+    renderWizard();
+  } catch (x) {
+    err.textContent = sentence(x.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// The network as discovered, beside what is saved; "Usar" saves the found ones.
+const NET_KEYS = [['router_ip', 'router_ip', 'IP do router'], ['tnas_ip', 'tnas_ip', 'IP do TNAS'], ['lan_iface', 'lan_iface', 'Interface da LAN'],
+  ['server_ip', 'server.ip', 'IP do servidor'], ['npm_check_host', 'server.npm_check_host', 'Endereço do NPM do servidor']];
+function netHtml(d) {
+  const row = (label, now, found) => `<tr><td>${esc(label)}</td><td class="mono">${esc(now || '—')}</td>
+    <td class="mono ${found && found !== now ? 'disc-new' : 'muted'}">${esc(found || 'não encontrado')}</td></tr>`;
+  const rows = NET_KEYS.map(([dk, sk, l]) => row(l, st.settings[sk], d.network[dk])).join('') + row('Zona DNS', st.settings['dns.zone'], d.dns.zone);
+  const changes = NET_KEYS.some(([dk, sk]) => d.network[dk] && d.network[dk] !== st.settings[sk]) || (d.dns.zone && d.dns.zone !== st.settings['dns.zone']);
+  return `<table class="disc-table"><thead><tr><th></th><th>Agora</th><th>Descoberto</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="sec-btns"><button type="button" class="btn contained" data-use-net ${changes && allHome() ? '' : 'disabled'}>${icon('check')}Usar os valores descobertos</button>
+      <a class="btn" href="#/definicoes/rede">Editar à mão</a></div>
+    ${!allHome() ? '<p class="note-text">A rede só muda com todos os serviços no servidor.</p>' : ''}`;
+}
+async function useNetwork() {
+  const d = await getDiscovery(true), rede = {};
+  for (const [dk, sk] of NET_KEYS) if (d.network[dk]) rede[sk] = d.network[dk];
+  const send = (section, values) => fetch(`api/config/section`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section, values})});
+  try {
+    let r = toLogin(await send('rede', rede));
+    if (!r.ok) throw new Error((await readErr(r)).error);
+    if (d.dns.zone && d.dns.zone !== st.settings['dns.zone']) {
+      r = toLogin(await send('dns', {'dns.zone': d.dns.zone}));
+      if (!r.ok) throw new Error((await readErr(r)).error);
+    }
+    toast('Rede gravada com os valores descobertos');
+    forgetDiscovery();
+    await refresh();
+    painted['wiz-body'] = null;
+    renderWizard();
+  } catch (err) {
+    toast(`Não foi possível: ${err.message}`, false);
+  }
+}
+
+// The discovered services, to protect with one click each (or all at once).
+function discListHtml(d, pickable) {
+  const rows = d.services.map(x => {
+    const can = !x.configured && !x.error && x.host;
+    const notes = [x.error, ...(x.notes || [])].filter(Boolean);
+    return `<li class="disc-row ${x.configured ? 'is-done' : ''}">
+      ${pickable ? `<input type="checkbox" data-pick="${esc(x.dir)}" ${can ? 'checked' : ''} ${x.configured || x.error ? 'disabled' : ''} aria-label="Proteger ${esc(x.name)}">` : ''}
+      <span class="grow"><strong>${esc(x.name)}</strong> <span class="mono muted">${esc(x.host || 'sem endereço')}</span>
+        ${notes.length ? `<small class="disc-notes">${notes.map(n => esc(sentence(n))).join(' ')}</small>` : ''}</span>
+      ${x.configured ? chip('Já protegido', 'var(--success)', 'xs') : pickable ? '' : `<button class="btn" data-panel="svcEdit" data-prefill="${esc(x.dir)}">Adicionar</button>`}</li>`;
+  }).join('');
+  return `<ul class="list disc-list">${rows || '<li class="empty">Não encontrei nenhuma pasta com docker-compose.yml no espelho.</li>'}</ul>`;
+}
+async function protectPicked(root) {
+  const dirs = [...root.querySelectorAll('[data-pick]:checked')].map(x => x.dataset.pick);
+  const failed = [];
+  for (const dir of dirs) {
+    const x = discOf(dir);
+    const r = toLogin(await fetch('api/service', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+      new: true, name: x.name, dir, host: x.host, wait_min: 5, stability_min: 10, icon: '', override_yaml: x.override_yaml || '',
+      require_free_ip: x.require_free_ip || '', kuma_token: ''})}));
+    if (!r.ok) failed.push(`${x.name}: ${(await readErr(r)).error}`);
+  }
+  if (dirs.length - failed.length) toast(`${plural(dirs.length - failed.length, 'serviço protegido', 'serviços protegidos')}`);
+  if (failed.length) toast(`Não consegui: ${failed.join('; ')}`, false);
+  forgetDiscovery();
+  await refresh();
+  painted['wiz-body'] = null;
+  renderWizard();
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-use-net]')) { useNetwork(); return; }
+  const prot = e.target.closest('[data-protect]');
+  if (prot) { prot.disabled = true; protectPicked(prot.closest('.set-sec, .sheet-body') || document); return; }
+  const det = e.target.closest('[data-detect]');
+  if (det) detectInto(det.closest('form.set-form'));
+});
+// Definições → Rede → Detetar: fills the form with what was found, not saved.
+async function detectInto(form) {
+  const d = await getDiscovery(true);
+  let n = 0;
+  for (const [dk, sk] of NET_KEYS) {
+    const el = form.elements[sk];
+    if (el && d.network[dk] && el.value !== d.network[dk]) { el.value = d.network[dk]; n++; }
+  }
+  markSection(form);
+  toast(n ? `${plural(n, 'valor detetado', 'valores detetados')}: revê e grava` : 'Nada de novo: os valores são os detetados');
+}
+
 // The first-start guide, for a new install: the forms of Definições, one step
 // at a time, then the services. It can be left and taken up again.
-const WIZ = [{id: 'conta', t: 'Conta'}, {id: 'rede', t: 'Rede'}, {id: 'dns', t: 'DNS'}, {id: 'kuma', t: 'Uptime Kuma'},
-  {id: 'caminhos', t: 'Caminhos'}, {id: 'servicos', t: 'Serviços'}, {id: 'fim', t: 'Concluir'}];
+const WIZ = [{id: 'conta', t: 'Conta'}, {id: 'technitium', t: 'Technitium'}, {id: 'rede', t: 'Rede'},
+  {id: 'servicos', t: 'Serviços'}, {id: 'fim', t: 'Concluir'}];
 const WIZ_INTRO = {
   conta: 'Primeiro, uma password só tua: a de fábrica (admin / admin) é a mesma em todas as instalações.',
-  rede: 'Onde estão o servidor, o TNAS e o router. O agente corre no TNAS e verifica o servidor daqui.',
-  dns: 'O Technitium onde o agente aponta o nome de um serviço para o TNAS durante um failover. Sem o token, um failover dá erro.',
-  kuma: 'Opcional: o agente avisa o Uptime Kuma a cada verificação, um monitor Push por token.',
-  caminhos: 'O espelho do servidor no TNAS (um subvolume Btrfs), a pasta dos snapshots e a dos overrides.',
-  servicos: 'Os serviços que podem passar para o TNAS. Cada um é uma pasta do espelho com docker-compose.yml.',
+  technitium: 'O agente aponta o nome de um serviço para o TNAS durante um failover. Entra com o utilizador do Technitium e o agente cria o seu próprio token; a password não fica guardada.',
+  rede: 'O que o agente encontrou no TNAS (o router, a rede) e no NPM do espelho (o servidor). Confirma e usa.',
+  servicos: 'As pastas do espelho com docker-compose.yml, com o endereço que o NPM lhes dá. Escolhe as que devem passar para o TNAS quando o servidor falha.',
   fim: 'O agente começa em observação: regista o que faria, sem agir. Quando confiares no que vês nos eventos, passa a automático em Definições → Geral.',
 };
 const wizIndex = () => Math.max(0, WIZ.findIndex(x => x.id === hashParts()[1]));
@@ -1364,11 +1534,19 @@ function wizStepHtml(id) {
     case 'conta':
       return `<h2>Conta</h2>${intro}${st.default_password ? `<div class="sec-btns"><button class="btn contained" data-pw>${icon('key')}Mudar a password</button></div>`
         : `<p class="ok-text wiz-done">${icon('check')}A password já não é a de fábrica.</p>`}`;
+    case 'technitium':
+      return `<h2>Technitium</h2>${intro}${st.dns_token ? `<p class="ok-text wiz-done">${icon('check')}O agente já tem um token do Technitium.</p><p class="note-text">Para outro, entra outra vez:</p>` : ''}
+        ${techLoginHtml()}<p class="note-text">Em ${mono(st.settings['dns.api_url'])}. Outro endereço ou um token feito à mão: <a href="#/definicoes/dns">Definições → DNS</a>.</p>`;
+    case 'rede':
+      if (!disc) { getDiscovery().then(() => { painted['wiz-body'] = null; renderWizard(); }, () => {}); return `<h2>Rede</h2>${intro}<p class="note-text">A procurar…</p>`; }
+      return `<h2>Rede</h2>${intro}${netHtml(disc)}`;
     case 'servicos':
-      return `<h2>Serviços</h2>${intro}<ul class="list wiz-svcs">${st.services.map(s => `<li><span class="svc-icon">${svcIcon(s.name)}</span>
-          <span class="grow"><strong>${esc(s.name)}</strong> <span class="mono muted">${esc(s.host)}</span></span>
-          <button class="btn" data-panel="svcEdit" data-svc="${esc(s.name)}">Editar</button></li>`).join('') || '<li class="empty">Ainda nenhum.</li>'}</ul>
-        <div class="sec-btns"><button class="btn contained" data-panel="svcEdit">+ Adicionar serviço</button></div>`;
+      if (!disc) { getDiscovery().then(() => { painted['wiz-body'] = null; renderWizard(); }, () => {}); return `<h2>Serviços</h2>${intro}<p class="note-text">A procurar no espelho…</p>`; }
+      if (!disc.mirror.found) return `<h2>Serviços</h2><p class="bad-text">Não encontrei o espelho em ${mono(disc.mirror.root)}. Indica onde está:</p>${sectionHtml(SECTIONS.find(x => x.id === 'caminhos'))}`;
+      return `<h2>Serviços</h2>${intro}${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
+        ${discListHtml(disc, true)}
+        <div class="sec-btns"><button class="btn contained" data-protect>${icon('shield')}Proteger os escolhidos</button>
+          <button class="btn" data-panel="svcEdit">+ Adicionar à mão</button></div>`;
     case 'fim':
       return `<h2>Concluir</h2>${intro}${kv([['Password', ok(!st.default_password, 'Mudada', 'Ainda a de fábrica')],
         ['Token do DNS', ok(st.dns_token, 'Definido', 'Em falta')], ['Serviços', esc(String(st.services.length))],
@@ -1388,7 +1566,7 @@ function renderWizard() {
 }
 // Leaving a step with changes not saved asks first, whichever way: the step
 // list, Anterior, Seguinte or Continuar mais tarde.
-const wizDirty = () => !!document.querySelector('#wiz-body form[data-dirty]') || [...document.querySelectorAll('#wiz-body .dns-token')].some(x => x.value);
+const wizDirty = () => !!document.querySelector('#wiz-body form[data-dirty]') || [...document.querySelectorAll('#wiz-body input[type=password]')].some(x => x.value);
 const wizLeave = () => !wizDirty() || confirmAction('Sair sem gravar?', 'Há alterações neste passo que ainda não gravaste; perdem-se.', 'Sair');
 $('page-setup').addEventListener('click', async e => {
   const link = e.target.closest('a[href^="#"]');
@@ -1517,7 +1695,7 @@ function renderPanel() {
   const found = st.services.find(s => s.name === panel.name);
   if (panel.kind === 'svc' && !found) { $('panel').close(); return; } // removed meanwhile
   const p = panel.kind === 'server' ? serverPanel() : panel.kind === 'tnas' ? tnasPanel()
-    : panel.kind === 'svcEdit' ? svcEditPanel() : svcPanel(found);
+    : panel.kind === 'svcEdit' ? svcEditPanel() : panel.kind === 'discover' ? discoverPanel() : svcPanel(found);
   paint('panelHead', p.head);
   // a list being chosen from must not be replaced under the pointer by the refresh
   const choosing = document.activeElement?.tagName === 'SELECT' && $('panelBody').contains(document.activeElement);
@@ -1610,7 +1788,7 @@ function tickLive() {
 
 document.addEventListener('click', async e => {
   const open = e.target.closest('[data-panel]');
-  if (open) { openPanel(open.dataset.panel, open.dataset.svc); return; }
+  if (open) { openPanel(open.dataset.panel, open.dataset.svc, open.dataset.prefill); return; }
   if (e.target.closest('[data-pw]')) { openPw(); return; }
   if (e.target.closest('[data-logout]')) { logout(); return; }
   if (e.target.closest('button[data-scan]')) { post('api/images', {}, 'A verificar as imagens no TNAS', 'images'); return; }
