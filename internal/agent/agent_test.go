@@ -21,6 +21,7 @@ type fake struct {
 	mu       sync.Mutex
 	cmds     []string        // every command except ping, in order
 	gets     []string        // every URL fetched
+	badCert  map[string]bool // host → its certificate does not verify
 	noPing   map[string]bool // ip → does not answer ping
 	down     map[string]bool // "host@ip" → HTTPS check fails
 	failCmd  []string        // command prefixes that fail
@@ -115,6 +116,9 @@ func (f *fake) Check(host, ip string) error {
 	defer f.mu.Unlock()
 	if f.down[host+"@"+ip] {
 		return errors.New("HTTP 502")
+	}
+	if f.badCert[host] {
+		return &CertError{Host: host, Err: errors.New("x509: certificate has expired")}
 	}
 	return nil
 }
@@ -377,6 +381,60 @@ func TestServerNPMDownServerAlive(t *testing.T) {
 	// the bars in the UI: the NPM failed, the services were not checked
 	if b := a.beats["vaultwarden"]; len(b) != maxBeats || b[len(b)-1].S != "unknown" || a.beats["npm"][maxBeats-1].S != "down" {
 		t.Fatalf("histórico das verificações errado: %d %+v", len(b), b[len(b)-1])
+	}
+}
+
+// A forced failover stays on the TNAS with the server healthy, past the
+// stability time, until a forced return.
+func TestForcedFailoverStays(t *testing.T) {
+	a, f := setup(t)
+	if code, body := postTo(t, a.postAction, `{"service":"vaultwarden","action":"failover"}`); code != 204 {
+		t.Fatalf("HTTP %d %s", code, body)
+	}
+	at := t0
+	tickTo(a, &at, 60)
+	wantStates(t, a, map[string]string{"vaultwarden": Active})
+	if !a.st.Services["vaultwarden"].Forced || f.ran("docker compose -p failover-vaultwarden down") >= 0 {
+		t.Fatalf("voltou sozinho: %+v", a.st.Services["vaultwarden"])
+	}
+	if code, body := postTo(t, a.postAction, `{"service":"vaultwarden","action":"return"}`); code != 204 {
+		t.Fatalf("HTTP %d %s", code, body)
+	}
+	tickTo(a, &at, 62)
+	wantStates(t, a, map[string]string{"vaultwarden": Normal})
+	if a.st.Services["vaultwarden"].Forced {
+		t.Fatal("o regresso deixou a marca de forçado")
+	}
+}
+
+// A certificate that does not verify (every service's, as a wildcard would)
+// counts as the service answering: no failover, one alert, one event when it
+// verifies again.
+func TestBadCertIsUp(t *testing.T) {
+	a, f := setup(t)
+	f.badCert = map[string]bool{"nginx.engmariz.com": true, "bitwarden.engmariz.com": true}
+	at := t0
+	tickTo(a, &at, 30)
+	a.mailJobs.Wait()
+	wantStates(t, a, map[string]string{"vaultwarden": Normal})
+	if f.ran("") >= 0 || !a.st.ServerNPMOK {
+		t.Fatalf("um certificado inválido contou como falha: %v", f.cmds)
+	}
+	n := 0
+	for _, e := range a.events {
+		if strings.Contains(e.Msg, "certificado de bitwarden.engmariz.com inválido") {
+			n++
+		}
+	}
+	if n != 1 || !mailed(f, "certificado de nginx.engmariz.com inválido") {
+		t.Fatalf("%d eventos do certificado (queria 1), emails %+v", n, f.mails)
+	}
+	f.mu.Lock()
+	f.badCert = nil
+	f.mu.Unlock()
+	tickTo(a, &at, 31)
+	if !hasEvent(a, "certificado de bitwarden.engmariz.com válido outra vez") {
+		t.Fatal("sem evento do certificado de volta")
 	}
 }
 

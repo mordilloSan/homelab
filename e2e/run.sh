@@ -234,6 +234,8 @@ login || {
 echo "ok: conta feita no primeiro acesso"
 
 wait_for '.services[0].state == "NORMAL" and .services[0].server_ok and .server_npm_ok' 40 "servidor saudável, nada a fazer"
+# the Caddys' certificates are their own CA's: they do not verify, and that is no failure
+wait_for '.events | any(.msg | test("certificado de nginx.test inválido"))' 30 "certificado que não verifica: aviso, conta como a responder"
 if [[ $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:18099/x) != "301 https://127.0.0.1:18099/x" ]]; then
 	echo "FALHOU: http:// na porta da interface não redireciona para https://"
 	exit 1

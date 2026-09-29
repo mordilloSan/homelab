@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +44,33 @@ func (RealSys) Output(name string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// CertError: host answered, with a certificate that did not verify (expired,
+// another name, an unknown CA). It is up: the TNAS serves the same
+// certificate, from the mirror, so a failover would not help.
+type CertError struct {
+	Host string
+	Err  error
+}
+
+func (e *CertError) Error() string {
+	return "certificado de " + e.Host + " inválido: " + e.Err.Error()
+}
+
+// certOK is what was wrong with the certificate ("" when it verified), and
+// err with a CertError counted as up.
+func certOK(err error) (string, error) {
+	var ce *CertError
+	if errors.As(err, &ce) {
+		return ce.Error(), nil
+	}
+	return "", err
+}
+
+// checkRoots are the CAs Check trusts; nil: the system's. Tests set their own.
+var checkRoots *x509.CertPool
+
+// Check asks https://host/ with the connection sent to ip (like curl
+// --resolve), verifying the certificate for host.
 func (RealSys) Check(host, ip string) error {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	c := &http.Client{
@@ -53,13 +81,16 @@ func (RealSys) Check(host, ip string) error {
 				_, port, _ := net.SplitHostPort(addr)
 				return dialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
 			},
-			// Like curl -k: this tests liveness, a certificate problem is not a failover.
-			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig:   &tls.Config{RootCAs: checkRoots, MinVersion: tls.VersionTLS12},
 			DisableKeepAlives: true,
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	resp, err := c.Get("https://" + host + "/")
+	var ve *tls.CertificateVerificationError
+	if errors.As(err, &ve) {
+		return &CertError{Host: host, Err: ve.Err}
+	}
 	if err != nil {
 		return unwrapURL(err)
 	}

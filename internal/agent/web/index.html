@@ -682,6 +682,7 @@ function describe(s) {
     case 'FAILING_OVER':
       return {text: sentence(s.msg) || 'A arrancar a cópia no TNAS.', pct: minsSince(s.since) / st.start_timeout_min, tone: 'warning'};
     case 'ACTIVE': {
+      if (s.forced) return {text: 'Failover forçado: fica no TNAS até Forçar regresso (ou até o arrastares para o servidor).'};
       if (!s.server_ok) return {text: 'A servir a partir do TNAS. Ainda não responde no servidor.'};
       const e = s.ok_since ? minsSince(s.ok_since) : 0, left = s.stability_min - e;
       if (left > 0) return {text: `Voltou a responder no servidor há ${dur(e)}. O regresso começa daqui a ${dur(left)}.`, pct: e / s.stability_min};
