@@ -65,26 +65,17 @@ type Config struct {
 		DefaultExpiryMin int `yaml:"default_expiry_min"`
 	} `yaml:"maintenance"`
 	DNS struct {
-		Enabled   *bool  `yaml:"enabled,omitempty"` // ignored: DNS is always on; read only so older files still load
 		APIURL    string `yaml:"api_url"`
 		TokenFile string `yaml:"token_file"`
 		Zone      string `yaml:"zone"`
 		TTL       int    `yaml:"ttl"`
 	} `yaml:"dns"`
-	Kuma struct {
-		BaseURL        string            `yaml:"base_url"`
-		HeartbeatToken string            `yaml:"heartbeat_token"`
-		NPMToken       string            `yaml:"npm_token"`
-		ServiceTokens  map[string]string `yaml:"service_tokens"`
-	} `yaml:"kuma"`
+	Email   EmailConfig `yaml:"email"`
 	Nightly struct {
 		PrepullAt string `yaml:"prepull_at"`
 	} `yaml:"nightly"`
 	UI struct {
 		Listen string `yaml:"listen"` // the login is in user.yml, next to this file
-		// ignored: the UI makes its own certificate; read only so older files still load
-		TLSCert string `yaml:"tls_cert,omitempty"`
-		TLSKey  string `yaml:"tls_key,omitempty"`
 	} `yaml:"ui"`
 }
 
@@ -145,12 +136,14 @@ func (c *Config) validate() error {
 		{c.DNS.TokenFile == "", "dns.token_file", "é obrigatório"},
 		{!isName(c.DNS.Zone), "dns.zone", "tem de ser um nome, sem espaços"},
 		{c.DNS.TTL < 1 || c.DNS.TTL > 86400, "dns.ttl", "tem de estar entre 1 e 86400 segundos"},
-		{c.Kuma.BaseURL != "" && !isURL(c.Kuma.BaseURL), "kuma.base_url", "tem de começar por http:// ou https://"},
 		{!isListen(c.UI.Listen), "ui.listen", "tem de ser endereço:porta, por exemplo 0.0.0.0:8099"},
 	} {
 		if r.bad {
 			return fe(r.field, r.msg)
 		}
+	}
+	if err := c.Email.validate(); err != nil {
+		return err
 	}
 	if at := c.Nightly.PrepullAt; at != "" {
 		if _, err := time.Parse("15:04", at); err != nil || len(at) != 5 {
@@ -215,8 +208,6 @@ func LoadConfig(path string) (Config, error) {
 	if err := c.validate(); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
-	c.DNS.Enabled = nil // gone from the file on the next save
-	c.UI.TLSCert, c.UI.TLSKey = "", ""
 	return c, nil
 }
 
@@ -288,7 +279,7 @@ type State struct {
 	ImagesAt     time.Time            `json:"images_at,omitzero"`
 	ImagesMsg    string               `json:"images_msg,omitempty"`
 	Services     map[string]*SvcState `json:"services"`
-	Events       []Event              `json:"events,omitempty"`        // only read: moved to events.jsonl on start
+	Running      bool                 `json:"running,omitempty"`       // Run is on; still true at a start: the last run crashed
 	SetupPending bool                 `json:"setup_pending,omitempty"` // a new install whose first-start guide is not finished; an older state lacks it: done
 }
 
@@ -298,7 +289,9 @@ type System interface {
 	Output(name string, args ...string) (string, error) // same, when stdout matters (image scan)
 	Check(host, ip string) error                        // https://host with the connection sent to ip (curl --resolve)
 	Get(url, bearer string) ([]byte, error)
-	Resolve(ip string) error // the resolver at ip answers for a name from the internet
+	Resolve(ip string) error            // the resolver at ip answers for a name from the internet
+	GetIcon(url string) ([]byte, error) // like Get, never to the TNAS itself or link-local
+	SendMail(m Mail) error
 }
 
 type Agent struct {
@@ -325,6 +318,8 @@ type Agent struct {
 	iconRev    map[string]string         // service → version of its stored icon, for the page's cache
 	iconJobs   sync.WaitGroup            // fetchIcons in the background (tests wait for it)
 	iconPass   sync.Mutex                // one fetchIcons pass at a time
+	alerts     []alertItem               // for the email of this check (flushAlerts)
+	mailJobs   sync.WaitGroup            // emails being sent (tests wait for them)
 	procRoute  string                    // the route table the discovery reads (tests set another)
 	ifaces     func() []ifaceAddr        // the interfaces the discovery reads (tests set others)
 	wake       chan struct{}
@@ -332,16 +327,20 @@ type Agent struct {
 	pulling    atomic.Bool
 	scanning   atomic.Bool
 	rescan     atomic.Bool // asked for while a scan ran
-	pushErr    string
 	beats      map[string][]Beat
 	tnasSeen   bool // last TNAS ping, so a change is logged once
 	userPath   string
-	creds      atomic.Pointer[creds] // read by every request, so outside mu
+	creds      atomic.Pointer[creds] // read by every request, so outside mu; nil: no account yet
+	started    time.Time             // the account can be made in the first 30 minutes after it
+	lastBeat   atomic.Int64          // the last check or command that ended, as time since started (monotonic), for the watchdog
+	watchCfg   atomic.Pointer[watchCfg]
+	exit       func(code int) // os.Exit; tests set another
 	sessions   sessions
 }
 
 func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error) {
-	a := &Agent{cfg: cfg, cfgPath: cfgPath, statePath: statePath, sys: sys, wake: make(chan struct{}, 1), now: time.Now(), beats: map[string][]Beat{}, tnasSeen: true}
+	a := &Agent{cfg: cfg, cfgPath: cfgPath, statePath: statePath, started: time.Now(), wake: make(chan struct{}, 1), now: time.Now(), beats: map[string][]Beat{}, tnasSeen: true}
+	a.sys = progress{sys, a}
 	a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK = true, true, true
 	b, err := os.ReadFile(statePath)
 	switch {
@@ -360,13 +359,10 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	}
 	a.eventsPath = eventsPath(statePath)
 	evs, err := loadEvents(a.eventsPath)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		evs = a.st.Events // from before events.jsonl
-	case err != nil:
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	a.events, a.st.Events = evs, nil
+	a.events = evs
 	a.trimEvents()
 	a.tnasIP.Store(&cfg.TNASIP)
 	a.iconRev = map[string]string{}
@@ -377,6 +373,10 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 		return nil, err
 	}
 	a.creds.Store(c)
+	a.exit = os.Exit
+	if a.st.Running {
+		a.crashed()
+	}
 	a.publish()
 	return a, nil
 }
@@ -385,6 +385,16 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 // the middle of a failover would leave a snapshot the state does not know.
 func (a *Agent) Run(ctx context.Context) {
 	a.iconJobs.Go(a.fetchIcons)
+	a.mu.Lock()
+	a.st.Running = true
+	a.save()
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.st.Running = false
+		a.save()
+		a.mu.Unlock()
+	}()
 	for {
 		a.mu.Lock()
 		stale := time.Since(a.st.ImagesAt) > time.Hour
@@ -419,12 +429,13 @@ func (a *Agent) Tick(now time.Time) {
 	a.now = now
 	a.evaluate(p)
 	a.stopIdleNPM()
-	a.report()
 	a.nightly()
+	a.flushAlerts()
 	if a.now.Format(time.DateOnly) != a.trimmedOn {
 		a.trimEvents()
 	}
 	a.save()
+	a.beat()
 }
 
 func minutes(n int) time.Duration { return time.Duration(n) * time.Minute }
@@ -606,7 +617,7 @@ func (a *Agent) evaluate(p probe) {
 	}
 	if p.routerOK != st.RouterOK {
 		st.RouterOK = p.routerOK
-		a.event("", map[bool]string{true: "router acessível", false: "router inacessível: sem ações"}[p.routerOK])
+		a.alert("", map[bool]string{true: "router acessível", false: "router inacessível: sem ações"}[p.routerOK])
 	}
 	if !st.RouterOK {
 		return
@@ -641,7 +652,7 @@ func (a *Agent) serverNPM(p probe) (known bool) {
 	st.ServerNPMOK, st.ServerUp = p.npmOK, p.npmOK || p.serverPing
 	if st.ServerNPMOK {
 		if st.NPMAlerted {
-			a.event("", "NPM do servidor voltou")
+			a.alert("", "NPM do servidor voltou")
 		}
 		st.NPMFailSince, st.NPMAlerted = time.Time{}, false
 		return true
@@ -654,7 +665,7 @@ func (a *Agent) serverNPM(p probe) (known bool) {
 	}
 	if !st.NPMAlerted && a.now.Sub(st.NPMFailSince) >= minutes(a.cfg.NPM.AlertAfterMin) {
 		st.NPMAlerted = true
-		a.event("", "NPM do servidor em falha com o servidor vivo: só aviso, sem failover")
+		a.alert("", "NPM do servidor em falha com o servidor vivo: só aviso, sem failover")
 	}
 	return false
 }
@@ -759,7 +770,7 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 		return
 	}
 	a.set(s, Active)
-	a.event(sv.Name, "em failover no TNAS")
+	a.alert(sv.Name, "em failover no TNAS")
 }
 
 // addDNS points the service's name to the TNAS, unless it already does.
@@ -809,7 +820,7 @@ func (a *Agent) fail(sv Service, s *SvcState, msg string) {
 		msg += "; limpeza falhou: " + err.Error()
 	}
 	s.Msg = msg
-	a.event(sv.Name, "ERRO: "+msg)
+	a.alert(sv.Name, "ERRO: "+msg)
 }
 
 // teardown undoes a failover in the order R1 requires: DNS, containers
@@ -840,7 +851,7 @@ func (a *Agent) giveBack(sv Service, s *SvcState) {
 		return
 	}
 	a.set(s, Normal)
-	a.event(sv.Name, "de volta ao servidor")
+	a.alert(sv.Name, "de volta ao servidor")
 }
 
 func (a *Agent) ensureNPM() error {
@@ -1001,48 +1012,6 @@ func (c *Config) hasToken() bool {
 	return err == nil && strings.TrimSpace(string(b)) != ""
 }
 
-var stateMsg = map[string]string{
-	Normal: "no servidor", FailingOver: "failover em curso", Active: "em failover no TNAS",
-	Returning: "a regressar ao servidor", Error: "erro",
-}
-
-// report pushes to the Kuma Push monitors every tick; a monitor that stops
-// receiving pushes goes down by itself, which is how a dead agent is noticed.
-func (a *Agent) report() {
-	k := &a.cfg.Kuma
-	a.push(k.HeartbeatToken, true, map[bool]string{true: "ok", false: "router inacessível"}[a.st.RouterOK])
-	a.push(k.NPMToken, !a.st.NPMAlerted, map[bool]string{true: "ok", false: "NPM do servidor em falha com o servidor vivo"}[!a.st.NPMAlerted])
-	for _, sv := range a.cfg.Services {
-		s := a.svc(sv.Name)
-		msg := stateMsg[s.State]
-		if s.Msg != "" {
-			msg += ": " + s.Msg
-		}
-		if a.inMaint(s) {
-			msg += " (manutenção)"
-		}
-		a.push(k.ServiceTokens[sv.Name], s.State == Normal, msg)
-	}
-}
-
-func (a *Agent) push(token string, up bool, msg string) {
-	if token == "" || a.cfg.Kuma.BaseURL == "" {
-		return
-	}
-	q := url.Values{"status": {map[bool]string{true: "up", false: "down"}[up]}, "msg": {msg}}
-	_, err := a.sys.Get(strings.TrimRight(a.cfg.Kuma.BaseURL, "/")+"/api/push/"+url.PathEscape(token)+"?"+q.Encode(), "")
-	e := ""
-	if err != nil {
-		e = err.Error()
-	}
-	if e != a.pushErr {
-		a.pushErr = e
-		if e != "" {
-			slog.Warn("kuma", "error", e)
-		}
-	}
-}
-
 type Image struct {
 	Ref     string    `json:"ref"`
 	Present bool      `json:"present"`
@@ -1198,6 +1167,13 @@ func (a *Agent) save() {
 	}
 }
 
+func userOf(c *creds) string {
+	if c == nil {
+		return ""
+	}
+	return c.User
+}
+
 type certView struct {
 	Names    []string  `json:"names"`
 	NotAfter time.Time `json:"not_after,omitzero"`
@@ -1208,13 +1184,14 @@ func (a *Agent) publish() {
 	type svcView struct {
 		Service
 		*SvcState
-		KumaToken bool   `json:"kuma_token"` // set or not; the token never leaves the agent
-		IconV     string `json:"icon_v,omitempty"`
+		IconV string `json:"icon_v,omitempty"`
 	}
 	svcs := make([]svcView, 0, len(a.cfg.Services))
 	for _, sv := range a.cfg.Services {
-		svcs = append(svcs, svcView{sv, a.svc(sv.Name), a.cfg.Kuma.ServiceTokens[sv.Name] != "", a.iconV(sv.Name)})
+		svcs = append(svcs, svcView{sv, a.svc(sv.Name), a.iconV(sv.Name)})
 	}
+	ui, _ := UIURL(cmp.Or(a.listening, a.cfg.UI.Listen), a.cfg.TNASIP, true)
+	a.watchCfg.Store(&watchCfg{a.cfg.Email, time.Duration(a.cfg.CheckIntervalS) * time.Second, ui})
 	names, notAfter := a.CertInfo()
 	a.evMu.Lock()
 	recent := slices.Clone(a.events[max(0, len(a.events)-statusEvents):])
@@ -1224,7 +1201,6 @@ func (a *Agent) publish() {
 	b, _ := json.Marshal(struct {
 		Now              time.Time `json:"now"`
 		Version          string    `json:"version"`
-		DefaultPassword  bool      `json:"default_password"`
 		User             string    `json:"user"`
 		Mode             string    `json:"mode"`
 		CheckIntervalS   int       `json:"check_interval_s"`
@@ -1260,7 +1236,7 @@ func (a *Agent) publish() {
 		UIListenRunning  string    `json:"ui_listen_running"`
 		Cert             any       `json:"cert"`
 	}{
-		a.now, Version, a.creds.Load().Default, a.creds.Load().User, a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
+		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,

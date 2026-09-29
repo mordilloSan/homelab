@@ -3,7 +3,6 @@ package agent
 import (
 	"cmp"
 	"errors"
-	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,7 +60,6 @@ type serviceReq struct {
 	Icon          string `json:"icon"`
 	OverrideYAML  string `json:"override_yaml"`
 	RequireFreeIP string `json:"require_free_ip"`
-	KumaToken     string `json:"kuma_token"` // empty keeps the current one
 }
 
 // postService adds a service (new) or edits one. What runs while the service
@@ -187,13 +185,6 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.KumaToken = strings.TrimSpace(req.KumaToken); req.KumaToken != "" {
-		next.Kuma.ServiceTokens = maps.Clone(next.Kuma.ServiceTokens)
-		if next.Kuma.ServiceTokens == nil {
-			next.Kuma.ServiceTokens = map[string]string{}
-		}
-		next.Kuma.ServiceTokens[sv.Name] = req.KumaToken
-	}
 	if err := saveConfig(a.cfgPath, &next); err != nil {
 		undo()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guardar configuração: " + err.Error()})
@@ -288,8 +279,6 @@ func (a *Agent) postServiceRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	next := a.cfg
 	next.Services = slices.Delete(slices.Clone(a.cfg.Services), i, i+1)
-	next.Kuma.ServiceTokens = maps.Clone(next.Kuma.ServiceTokens)
-	delete(next.Kuma.ServiceTokens, req.Name)
 	if err := saveConfig(a.cfgPath, &next); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guardar configuração: " + err.Error()})
 		return

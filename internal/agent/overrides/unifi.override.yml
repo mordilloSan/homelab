@@ -1,6 +1,0 @@
-# Decisão 7.3: o mesmo IP .92, em macvlan sobre o bridge OVS do TNAS
-# (no servidor é enp2s0). O nome da rede tem de ser o do compose do UniFi.
-networks:
-  lan:
-    driver_opts:
-      parent: ovs_eth0

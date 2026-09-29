@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -113,13 +115,73 @@ func (a *Agent) auth(next http.Handler) http.Handler {
 	})
 }
 
+// setupWindow is how long after the agent starts the account can be made:
+// until then, whoever opens the page first gets it (as in Portainer).
+const setupWindow = 30 * time.Minute
+
+// getLogin serves the login form, or, with no account yet, the form that
+// makes it (data-setup open), or says to restart the agent (closed).
 func (a *Agent) getLogin(w http.ResponseWriter, r *http.Request) {
-	if a.sessions.valid(r) {
+	if a.creds.Load() != nil && a.sessions.valid(r) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	page := loginHTML
+	if a.creds.Load() == nil {
+		mode := map[bool]string{true: "open", false: "closed"}[time.Since(a.started) < setupWindow]
+		page = bytes.Replace(loginHTML, []byte("<body>"), []byte(`<body data-setup="`+mode+`">`), 1)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(loginHTML)
+	_, _ = w.Write(page)
+}
+
+// postSetup makes the admin account on the first visit: a plain form post,
+// like the login, only while there is none and within setupWindow.
+func (a *Agent) postSetup(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	user, pw := strings.TrimSpace(r.PostFormValue("username")), r.PostFormValue("password")
+	fail := func(code string) { http.Redirect(w, r, "/login?erro="+code, http.StatusSeeOther) }
+	switch {
+	case a.creds.Load() != nil:
+		fail("existe")
+		return
+	case time.Since(a.started) >= setupWindow:
+		fail("fora")
+		return
+	case user == "" || strings.ContainsAny(user, " \t:"):
+		fail("utilizador")
+		return
+	case len(pw) < 8:
+		fail("curta")
+		return
+	case len(pw) > 72: // bcrypt's limit
+		fail("longa")
+		return
+	case pw != r.PostFormValue("password2"):
+		fail("diferentes")
+		return
+	}
+	c, err := newCreds(user, pw)
+	if err != nil {
+		fail("erro")
+		return
+	}
+	if !a.creds.CompareAndSwap(nil, c) { // someone else made it meanwhile
+		fail("existe")
+		return
+	}
+	if err := saveUser(a.userPath, c); err != nil {
+		a.creds.Store(nil)
+		slog.Error("guardar a conta", "error", err)
+		fail("erro")
+		return
+	}
+	a.mu.Lock()
+	a.now = time.Now()
+	a.event("", "conta de administrador criada: "+user)
+	a.mu.Unlock()
+	setSession(w, r, a.sessions.create(), 0)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // postLogin takes a plain form post, the kind password managers recognise
@@ -128,6 +190,10 @@ func (a *Agent) postLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	user, pw := r.PostFormValue("username"), r.PostFormValue("password")
 	c := a.creds.Load()
+	if c == nil { // no account yet: the page offers to make it
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 	// both are always checked, so the time taken does not tell which one was wrong
 	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
 	pwOK := bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(pw)) == nil

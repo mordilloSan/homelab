@@ -12,8 +12,8 @@ the Dockerfile and image, the compose file, the end-to-end scripts and the
 workflows.
 
 Vulnerabilities in the software it drives belong to their own projects:
-Docker and Compose, Btrfs, Technitium DNS, Nginx Proxy Manager, Uptime Kuma,
-and the services it moves between the server and the TNAS.
+Docker and Compose, Btrfs, Technitium DNS, Nginx Proxy Manager, the mail
+server, and the services it moves between the server and the TNAS.
 
 ## By design
 

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -21,7 +22,7 @@ import (
 	"time"
 )
 
-// T-18: the login form (admin/admin at first), sessions, JSON only, edits
+// T-18: the account made on the first visit, the login form, sessions, JSON only, edits
 // applied and persisted without a restart, and the password change.
 //
 //nolint:gocognit,cyclop // one request table walked in order, like a session in the browser
@@ -29,8 +30,8 @@ func TestUI(t *testing.T) {
 	a, _ := setup(t)
 	srv := httptest.NewServer(a.Handler())
 	defer srv.Close()
-	if v := string(*a.view.Load()); strings.Contains(v, "0001-01-01") || !strings.Contains(v, `"default_password":true`) {
-		t.Fatalf("estado da interface: hora zero ou sem o aviso da password por defeito: %s", v)
+	if v := string(*a.view.Load()); strings.Contains(v, "0001-01-01") {
+		t.Fatalf("estado da interface: hora zero: %s", v)
 	}
 
 	// a browser: keeps the cookie, does not follow redirects so they can be checked
@@ -66,13 +67,25 @@ func TestUI(t *testing.T) {
 	if do(anon, "", "/", "") != http.StatusSeeOther || do(anon, "", "/api/status", "") != 401 || do(anon, "", "/api/events", "") != 401 || do(anon, "", "/login", "") != 200 {
 		t.Fatal("sem sessão: a página tem de ir para o login e a API responder 401")
 	}
-	for _, bad := range [][2]string{{"admin", "errada"}, {"outro", "admin"}} {
+	setupAccount := func(c *http.Client, user, pw, again string) string {
+		t.Helper()
+		resp, err := c.PostForm(srv.URL+"/setup", url.Values{"username": {user}, "password": {pw}, "password2": {again}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.Header.Get("Location")
+	}
+	if setupAccount(me, "admin", "uma-password-velha", "uma-password-velha") != "/" {
+		t.Fatal("a conta do primeiro acesso não foi criada")
+	}
+	for _, bad := range [][2]string{{"admin", "errada"}, {"outro", "uma-password-velha"}} {
 		if got := login(anon, bad[0], bad[1]); got != "/login?erro=1" {
 			t.Fatalf("login %v: foi para %q", bad, got)
 		}
 	}
-	if login(me, "admin", "admin") != "/" || login(other, "admin", "admin") != "/" {
-		t.Fatal("admin/admin não entra")
+	if login(other, "admin", "uma-password-velha") != "/" {
+		t.Fatal("a conta criada não entra")
 	}
 	if do(me, "", "/login", "") != http.StatusSeeOther {
 		t.Fatal("com sessão, o login devia mandar para a página")
@@ -93,8 +106,8 @@ func TestUI(t *testing.T) {
 		{js, "/api/action", `{"service":"homepage","action":"return"}`, 409},
 		{js, "/api/action", `{"service":"homepage","action":"failover"}`, 204},
 		{js, "/api/password", `{"current":"errada","new":"uma-password-nova"}`, 403},
-		{js, "/api/password", `{"current":"admin","new":"curta"}`, 400},
-		{js, "/api/password", `{"current":"admin","new":"uma-password-nova"}`, 204},
+		{js, "/api/password", `{"current":"uma-password-velha","new":"curta"}`, 400},
+		{js, "/api/password", `{"current":"uma-password-velha","new":"uma-password-nova"}`, 204},
 		{"", "/api/status", "", 200}, // the session that changed it goes on
 	} {
 		if got := do(me, c.ctype, c.path, c.body); got != c.want {
@@ -104,7 +117,7 @@ func TestUI(t *testing.T) {
 	if do(other, "", "/api/status", "") != 401 {
 		t.Error("a outra sessão continua aberta depois de mudar a password")
 	}
-	if login(browser(), "admin", "admin") != "/login?erro=1" || login(browser(), "admin", "uma-password-nova") != "/" {
+	if login(browser(), "admin", "uma-password-velha") != "/login?erro=1" || login(browser(), "admin", "uma-password-nova") != "/" {
 		t.Error("depois de mudar, a password antiga ainda entra ou a nova não")
 	}
 	if do(me, js, "/api/logout", "{}") != 204 || do(me, "", "/api/status", "") != 401 {
@@ -125,8 +138,8 @@ func TestUI(t *testing.T) {
 	if strings.Contains(string(b), "uma-password-nova") || !strings.Contains(string(b), "$2a$") {
 		t.Fatalf("user.yml: %s", b)
 	}
-	if c, err := loadUser(a.userPath); err != nil || c.Default {
-		t.Fatalf("depois de mudar, a password por defeito ainda conta: %v", err)
+	if c, err := loadUser(a.userPath); err != nil || c == nil || c.User != "admin" {
+		t.Fatalf("user.yml depois de mudar a password: %v %+v", err, c)
 	}
 }
 
@@ -227,6 +240,9 @@ func TestHealthcheck(t *testing.T) {
 		if Healthcheck("0.0.0.0:"+port, other) == nil {
 			t.Errorf("%s: healthcheck ok com um certificado que não é o da interface", c.name)
 		}
+		if err := SelfCheck("0.0.0.0:" + port); err != nil { // the watchdog: whatever certificate is served
+			t.Errorf("%s: SelfCheck: %v", c.name, err)
+		}
 		tsrv.Close()
 	}
 }
@@ -317,4 +333,80 @@ func TestEventsAPI(t *testing.T) {
 func withSession(a *Agent, r *http.Request) *http.Request {
 	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: a.sessions.create()})
 	return r
+}
+
+// With no account, the first visit makes one: only within 30 minutes of the
+// agent's start, and never over an account that exists.
+func TestFirstAccount(t *testing.T) {
+	a, _ := setup(t)
+	srv := httptest.NewServer(a.Handler())
+	defer srv.Close()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	page := func() string {
+		t.Helper()
+		resp, err := c.Get(srv.URL + "/login")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return string(b)
+	}
+	post := func(path string, v url.Values) string {
+		t.Helper()
+		resp, err := c.PostForm(srv.URL+path, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.Header.Get("Location")
+	}
+	if !strings.Contains(page(), `data-setup="open"`) {
+		t.Fatal("sem conta, o login não pede para a criar")
+	}
+	if got := post("/login", url.Values{"username": {"admin"}, "password": {"admin"}}); got != "/login" {
+		t.Fatalf("admin/admin ainda entra: %q", got)
+	}
+	for erro, v := range map[string]url.Values{
+		"curta":      {"username": {"miguel"}, "password": {"curta"}, "password2": {"curta"}},
+		"diferentes": {"username": {"miguel"}, "password": {"uma-password"}, "password2": {"outra-password"}},
+		"utilizador": {"username": {" "}, "password": {"uma-password"}, "password2": {"uma-password"}},
+	} {
+		if got := post("/setup", v); got != "/login?erro="+erro {
+			t.Errorf("%s: %q", erro, got)
+		}
+	}
+	ok := url.Values{"username": {"miguel"}, "password": {"uma-password"}, "password2": {"uma-password"}}
+	if got := post("/setup", ok); got != "/" {
+		t.Fatalf("criar: %q", got)
+	}
+	if b, _ := os.ReadFile(a.userPath); !strings.Contains(string(b), "miguel") || strings.Contains(string(b), "uma-password") {
+		t.Fatalf("user.yml: %s", b)
+	}
+	if got := post("/setup", url.Values{"username": {"intruso"}, "password": {"outra-password"}, "password2": {"outra-password"}}); got != "/login?erro=existe" {
+		t.Fatalf("criou por cima de uma conta: %q", got)
+	}
+
+	late, _ := setup(t)
+	late.started = time.Now().Add(-31 * time.Minute)
+	srv2 := httptest.NewServer(late.Handler())
+	defer srv2.Close()
+	resp, err := http.Get(srv2.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(b), `data-setup="closed"`) {
+		t.Fatal("passados 30 minutos ainda se podia criar a conta")
+	}
+	resp, err = c.PostForm(srv2.URL+"/setup", ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("Location"); got != "/login?erro=fora" || fileExists(late.userPath) {
+		t.Fatalf("fora da janela: %q", got)
+	}
 }

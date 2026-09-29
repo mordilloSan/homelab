@@ -53,25 +53,6 @@ func TestEventsDailyTrim(t *testing.T) {
 	}
 }
 
-// A restart before the first save still has the events in state.json: they
-// are not moved twice.
-func TestEventsMigrateOnce(t *testing.T) {
-	dir := t.TempDir()
-	writeLines(t, filepath.Join(dir, "state.json"), `{"router_ok":true,"services":{},"events":[`+evLine(time.Now().Add(-time.Hour), "antigo")+`]}`)
-	f := &fake{noPing: map[string]bool{}, down: map[string]bool{}}
-	newTestAgent(t, dir, f)
-	again := newTestAgent(t, dir, f)
-	if n := strings.Count(strings.Join(func() []string {
-		var s []string
-		for _, e := range again.events {
-			s = append(s, e.Msg)
-		}
-		return s
-	}(), " "), "antigo"); n != 1 {
-		t.Fatalf("o evento migrado aparece %d vezes", n)
-	}
-}
-
 func TestConfigPartialInterval(t *testing.T) {
 	a, _ := setup(t)
 	mode := a.cfg.Mode
@@ -166,7 +147,7 @@ func TestSectionServiceRule(t *testing.T) {
 }
 
 func TestDotFolderRefused(t *testing.T) {
-	base, _ := LoadConfig("config/failover.yml")
+	base, _ := LoadConfig("testdata/failover.yml")
 	base.NPM.Dir = "."
 	var fe *FieldError
 	if err := base.validate(); !errors.As(err, &fe) || fe.Field != "npm.dir" {
@@ -176,7 +157,7 @@ func TestDotFolderRefused(t *testing.T) {
 
 // mirror_root "." (the subvolume itself) still loads; only service and NPM folders must be below it.
 func TestMirrorRootDot(t *testing.T) {
-	base, _ := LoadConfig("config/failover.yml")
+	base, _ := LoadConfig("testdata/failover.yml")
 	base.Paths.MirrorRoot = "."
 	if err := base.validate(); err != nil {
 		t.Fatal(err)
