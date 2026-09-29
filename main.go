@@ -106,7 +106,6 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	if err != nil {
 		return err
 	}
-	agent.WriteOverrides(&cfg)
 	if err = os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		return fmt.Errorf("pasta do estado: %w", err)
 	}
@@ -147,6 +146,7 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 	}
 	slog.Info("failover-agent a correr", "version", version, "mode", cfg.Mode, "ui", ui)
 	a.Preflight()
+	go a.Watchdog(ctx, func() error { return agent.SelfCheck(cfg.UI.Listen) })
 	a.Run(ctx)
 
 	shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)

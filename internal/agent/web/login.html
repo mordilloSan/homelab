@@ -24,6 +24,7 @@
     --primary: #376fd0; --primary-dark: #2052c2; --error: #cf222e; }
 }
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text);
   font: 400 13px/1.5 "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
 form { width: min(380px, 100%); padding: 28px; border-radius: 16px; background-color: var(--card); background-image: var(--card-gradient);
@@ -40,6 +41,8 @@ input { width: 100%; padding: 9px 11px; border-radius: 4px; border: 1px solid va
 input:hover { border-color: color-mix(in srgb, var(--text), transparent 60%); }
 input:focus-visible, button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .err { margin: 8px 0 0; color: var(--error); }
+label small { color: var(--muted); font-weight: 400; }
+code { font-size: 12px; }
 button { margin-top: 16px; padding: 9px 16px; border: 0; border-radius: 4px; background: var(--primary); color: #fff; font: inherit;
   font-size: 14px; font-weight: 500; cursor: pointer; text-shadow: 0 1px 1px rgba(0,0,0,.3); }
 button:hover { background: var(--primary-dark); }
@@ -47,8 +50,8 @@ button:hover { background: var(--primary-dark); }
 </style>
 </head>
 <body>
-<!-- A plain form post with the standard field names and autocomplete tokens,
-     so password managers (Bitwarden) fill it in and offer to save it. -->
+<!-- Plain form posts with the standard field names and autocomplete tokens,
+     so password managers (Bitwarden) fill them in and offer to save them. -->
 <form method="post" action="/login" id="login">
   <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
   <h1>Failover do homelab</h1>
@@ -60,8 +63,43 @@ button:hover { background: var(--primary-dark); }
   <p class="err" id="err" role="alert" hidden>Utilizador ou password errados.</p>
   <button type="submit">Entrar</button>
 </form>
+<!-- The first visit: no account yet, whoever opens the page makes it. -->
+<form method="post" action="/setup" id="setup" hidden>
+  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
+  <h1>Criar a conta de administrador</h1>
+  <p class="sub">É a primeira vez que abres o failover. Escolhe o utilizador e a password com que vais entrar.</p>
+  <label for="s-username">Utilizador</label>
+  <input id="s-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+  <label for="s-password">Password <small>(pelo menos 8 caracteres)</small></label>
+  <input id="s-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+  <label for="s-password2">Repetir a password</label>
+  <input id="s-password2" name="password2" type="password" autocomplete="new-password" minlength="8" required>
+  <p class="err" id="s-err" role="alert" hidden></p>
+  <button type="submit">Criar e entrar</button>
+</form>
+<form id="closed" hidden>
+  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
+  <h1>Ainda não há conta</h1>
+  <p class="sub">A conta só se cria nos 30 minutos a seguir ao arranque do agente, para ninguém na rede a criar antes de ti. Reinicia o container (<code>docker restart failover-agent</code>) e abre esta página logo a seguir.</p>
+</form>
 <script>
-if (new URLSearchParams(location.search).has('erro')) document.getElementById('err').hidden = false;
+const mode = document.body.dataset.setup, erro = new URLSearchParams(location.search).get('erro');
+const why = {curta: 'A password tem de ter pelo menos 8 caracteres.', longa: 'A password pode ter até 72 caracteres.', diferentes: 'As duas passwords não são iguais.',
+  utilizador: 'Escolhe um utilizador, sem espaços.', existe: 'A conta já foi criada: entra com ela.',
+  fora: 'Já passaram 30 minutos desde o arranque: reinicia o agente para criar a conta.', erro: 'Não foi possível guardar a conta.'};
+if (mode === 'open') {
+  document.getElementById('login').hidden = true;
+  document.getElementById('setup').hidden = false;
+  document.getElementById('s-username').focus();
+  if (erro && why[erro]) Object.assign(document.getElementById('s-err'), {hidden: false, textContent: why[erro]});
+} else if (mode === 'closed') {
+  document.getElementById('login').hidden = true;
+  document.getElementById('closed').hidden = false;
+} else if (erro) {
+  const e = document.getElementById('err');
+  e.hidden = false;
+  if (why[erro]) e.textContent = why[erro];
+}
 </script>
 </body>
 </html>

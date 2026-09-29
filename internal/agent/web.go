@@ -45,6 +45,7 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("POST /api/config/section", a.postSection)
 	mux.HandleFunc("POST /api/config/check", a.postCheck)
 	mux.HandleFunc("POST /api/restart", a.postRestart)
+	mux.HandleFunc("POST /api/email/test", a.postEmailTest)
 	mux.HandleFunc("POST /api/setup/done", a.postSetupDone)
 	mux.HandleFunc("GET /api/mirror", a.getMirror)
 	mux.HandleFunc("GET /api/discover", a.getDiscover)
@@ -66,6 +67,7 @@ func (a *Agent) Handler() http.Handler {
 	root := http.NewServeMux() // open: the login and what it shows
 	root.HandleFunc("GET /login", a.getLogin)
 	root.HandleFunc("POST /login", a.postLogin)
+	root.HandleFunc("POST /setup", a.postSetup)
 	root.HandleFunc("GET /inter.woff2", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "font/woff2")
 		w.Header().Set("Cache-Control", "private, max-age=604800")
@@ -115,6 +117,21 @@ func Healthcheck(listen, certFile string) error {
 			return err
 		}
 	}
+	return healthz(u, tr)
+}
+
+// SelfCheck is Healthcheck for the agent's own watchdog: it asks whether the
+// page answers, not whether the certificate on disk is the one served (one
+// that could not be saved lives only in memory).
+func SelfCheck(listen string) error {
+	u, err := UIURL(listen, "127.0.0.1", true)
+	if err != nil {
+		return err
+	}
+	return healthz(u, &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}) //nolint:gosec // its own loopback, only for liveness
+}
+
+func healthz(u string, tr *http.Transport) error {
 	c := http.Client{Timeout: 5 * time.Second, Transport: tr}
 	resp, err := c.Get(u + "/healthz")
 	if err != nil {

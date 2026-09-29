@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -89,6 +90,43 @@ func (RealSys) Resolve(ip string) error {
 
 var apiClient = &http.Client{Timeout: 10 * time.Second}
 
+// refuseLocal is the dialer's check for icon downloads: never loopback
+// (where the TNAS's Technitium API and this UI answer on the host network)
+// nor a link-local address. The TNAS's LAN address is not refused: the
+// LAN is where self-hosted icons live. It runs on every connection, so a redirect or a name
+// that resolves there is refused too; the LAN stays reachable.
+func refuseLocal(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	ip := net.ParseIP(host)
+	if err != nil || ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
+		return fmt.Errorf("endereço local recusado para ícones: %s", host)
+	}
+	return nil
+}
+
+var iconClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+	DialContext:         (&net.Dialer{Timeout: 5 * time.Second, Control: refuseLocal}).DialContext,
+	TLSHandshakeTimeout: 5 * time.Second,
+}}
+
+// GetIcon downloads an icon's link, through iconClient.
+func (RealSys) GetIcon(u string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, errors.New("URL inválido")
+	}
+	resp, err := iconClient.Do(req)
+	if err != nil {
+		return nil, unwrapURL(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 300 {
+		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return body, err
+}
+
 func (RealSys) Get(u, bearer string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
@@ -109,7 +147,8 @@ func (RealSys) Get(u, bearer string) ([]byte, error) {
 	return body, err
 }
 
-// unwrapURL drops the URL from errors: Kuma push URLs carry the tokens.
+// unwrapURL drops the URL from errors: a URL may carry a secret (the
+// Technitium login's password).
 func unwrapURL(err error) error {
 	if ue, ok := errors.AsType[*url.Error](err); ok {
 		return ue.Err

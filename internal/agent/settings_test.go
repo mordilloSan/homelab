@@ -51,20 +51,6 @@ func TestSectionRede(t *testing.T) {
 	}
 }
 
-// Secrets: empty keeps, a value replaces, and neither ever leaves the agent.
-func TestSectionSecrets(t *testing.T) {
-	a, _ := setup(t)
-	if code, _ := postTo(t, a.postSection, `{"section":"kuma","values":{"kuma.npm_token":""}}`); code != 204 || a.cfg.Kuma.NPMToken != "npmtok" {
-		t.Fatalf("vazio não manteve: %d %q", code, a.cfg.Kuma.NPMToken)
-	}
-	if code, _ := postTo(t, a.postSection, `{"section":"kuma","values":{"kuma.npm_token":" novo "}}`); code != 204 || a.cfg.Kuma.NPMToken != "novo" {
-		t.Fatalf("não substituiu: %d %q", code, a.cfg.Kuma.NPMToken)
-	}
-	if v := string(*a.view.Load()); strings.Contains(v, "novo") || !strings.Contains(v, `"kuma.npm_token":true`) {
-		t.Fatalf("o estado mostra o token ou não diz que existe: %s", v)
-	}
-}
-
 func TestSectionNumbersAndListen(t *testing.T) {
 	a, _ := setup(t)
 	if code, body := postTo(t, a.postSection, `{"section":"verificacao","values":{"start_timeout_min":"x"}}`); code != 400 || !strings.Contains(body, "start_timeout_min") {

@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"embed"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,8 +18,6 @@ import (
 var (
 	//go:embed config/failover.yml
 	defaultConfig []byte
-	//go:embed overrides/*.yml
-	defaultOverrides embed.FS
 )
 
 // FirstRun writes the shipped config when there is none yet.
@@ -32,31 +30,6 @@ func FirstRun(cfgPath string) error {
 	}
 	slog.Info("sem configuração: criada a por defeito (modo observe)", "file", cfgPath)
 	return writeAtomic(cfgPath, defaultConfig)
-}
-
-// WriteOverrides puts the shipped overrides in place when the config names
-// one that is missing. An existing file is never touched.
-func WriteOverrides(c *Config) {
-	for _, s := range c.Services {
-		dst := filepath.Join(c.Paths.OverridesDir, s.Override)
-		if s.Override == "" || fileExists(dst) {
-			continue
-		}
-		b, err := defaultOverrides.ReadFile("overrides/" + s.Override)
-		if err != nil {
-			slog.Warn("o override não existe", "svc", s.Name, "file", dst)
-			continue
-		}
-		err = os.MkdirAll(c.Paths.OverridesDir, 0o755)
-		if err == nil {
-			err = writeAtomic(dst, b)
-		}
-		if err != nil {
-			slog.Error("não foi possível criar o override", "svc", s.Name, "file", dst, "error", err)
-			continue
-		}
-		slog.Info("override criado: revê os nomes do serviço e da rede", "svc", s.Name, "file", dst)
-	}
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
@@ -76,10 +49,7 @@ func chownLikeDir(path string) {
 type creds struct {
 	User         string `yaml:"user"`
 	PasswordHash string `yaml:"password_hash"`
-	Default      bool   `yaml:"-"` // still admin/admin: the UI asks to change it
 }
-
-const defaultUser, defaultPassword = "admin", "admin"
 
 var bcryptCost = bcrypt.DefaultCost // tests lower it: the race detector makes bcrypt slow
 
@@ -88,28 +58,24 @@ func newCreds(user, pw string) (*creds, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &creds{User: user, PasswordHash: string(h), Default: user == defaultUser && pw == defaultPassword}, nil
+	return &creds{User: user, PasswordHash: string(h)}, nil
 }
 
-// loadUser reads user.yml, or creates it with admin/admin.
+// loadUser reads user.yml; without one there is no account yet (nil), and
+// the first visit makes it.
 func loadUser(path string) (*creds, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		c, cerr := newCreds(defaultUser, defaultPassword)
-		if cerr != nil {
-			return nil, cerr
-		}
-		slog.Warn("sem utilizador: entra com o utilizador e a password por defeito e muda a password na interface", "file", path)
-		return c, saveUser(path, c)
+		slog.Warn("sem conta: abre a interface nos próximos 30 minutos para a criar", "file", path)
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	var c creds
 	if err := yaml.Unmarshal(b, &c); err != nil || c.User == "" || c.PasswordHash == "" {
-		return nil, fmt.Errorf("%s inválido: apaga-o para voltar ao utilizador por defeito", path)
+		return nil, fmt.Errorf("%s inválido: apaga-o e reinicia para criar a conta outra vez", path)
 	}
-	c.Default = c.User == defaultUser && bcrypt.CompareHashAndPassword([]byte(c.PasswordHash), []byte(defaultPassword)) == nil
 	return &c, nil
 }
 

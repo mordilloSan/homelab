@@ -33,7 +33,7 @@ func num(key, section string, f func(*Config) *int) setting {
 func locked(s setting) setting { s.locked = true; return s }
 func secret(s setting) setting { s.secret = true; return s }
 
-// Services and kuma.service_tokens are set with the services (part C).
+// Services are set with the services' own form.
 var settings = []setting{
 	locked(str("server.ip", "rede", func(c *Config) *string { return &c.Server.IP })),
 	locked(str("server.npm_check_host", "rede", func(c *Config) *string { return &c.Server.NPMCheckHost })),
@@ -46,14 +46,18 @@ var settings = []setting{
 	str("dns.api_url", "dns", func(c *Config) *string { return &c.DNS.APIURL }),
 	str("dns.zone", "dns", func(c *Config) *string { return &c.DNS.Zone }),
 	num("dns.ttl", "dns", func(c *Config) *int { return &c.DNS.TTL }),
-	str("kuma.base_url", "kuma", func(c *Config) *string { return &c.Kuma.BaseURL }),
-	secret(str("kuma.heartbeat_token", "kuma", func(c *Config) *string { return &c.Kuma.HeartbeatToken })),
-	secret(str("kuma.npm_token", "kuma", func(c *Config) *string { return &c.Kuma.NPMToken })),
 	locked(str("paths.mirror_subvol", "caminhos", func(c *Config) *string { return &c.Paths.MirrorSubvol })),
 	locked(str("paths.mirror_root", "caminhos", func(c *Config) *string { return &c.Paths.MirrorRoot })),
 	locked(str("paths.snapshots_dir", "caminhos", func(c *Config) *string { return &c.Paths.SnapshotsDir })),
 	locked(str("paths.overrides_dir", "caminhos", func(c *Config) *string { return &c.Paths.OverridesDir })),
 	locked(str("npm.dir", "caminhos", func(c *Config) *string { return &c.NPM.Dir })),
+	str("email.host", "avisos", func(c *Config) *string { return &c.Email.Host }),
+	num("email.port", "avisos", func(c *Config) *int { return &c.Email.Port }),
+	str("email.security", "avisos", func(c *Config) *string { return &c.Email.Security }),
+	str("email.user", "avisos", func(c *Config) *string { return &c.Email.User }),
+	secret(str("email.password", "avisos", func(c *Config) *string { return &c.Email.Password })),
+	str("email.from", "avisos", func(c *Config) *string { return &c.Email.From }),
+	str("email.to", "avisos", func(c *Config) *string { return &c.Email.To }),
 	str("nightly.prepull_at", "noturna", func(c *Config) *string { return &c.Nightly.PrepullAt }),
 	str("ui.listen", "interface", func(c *Config) *string { return &c.UI.Listen }),
 }
@@ -232,14 +236,6 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 	case "dns":
 		b, _ := os.ReadFile(c.DNS.TokenFile)
 		add("dns.zone", testToken(a.sys, c.DNS.APIURL, c.DNS.Zone, strings.TrimSpace(string(b))), "o Technitium responde para a zona "+c.DNS.Zone)
-	case "kuma":
-		if c.Kuma.BaseURL != "" {
-			_, err := a.sys.Get(c.Kuma.BaseURL, "")
-			if err != nil && strings.HasPrefix(err.Error(), "HTTP ") {
-				err = nil // any HTTP answer: it is there
-			}
-			add("kuma.base_url", err, "o Kuma responde")
-		}
 	case "caminhos":
 		root := filepath.Join(c.Paths.MirrorSubvol, c.Paths.MirrorRoot)
 		dir("paths.mirror_subvol", c.Paths.MirrorSubvol)

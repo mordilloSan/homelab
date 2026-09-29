@@ -36,7 +36,7 @@ func svcSetup(t *testing.T) (*Agent, *fake) {
 }
 
 const nextcloud = `{"new":true,"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":5,"stability_min":10,
-	"icon":"","override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":"nctok"}`
+	"icon":"","override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n"}`
 
 func TestServiceAdd(t *testing.T) {
 	a, _ := svcSetup(t)
@@ -44,17 +44,14 @@ func TestServiceAdd(t *testing.T) {
 		t.Fatalf("HTTP %d: %s", code, body)
 	}
 	sv, ok := a.service("nextcloud")
-	if !ok || sv.Override != "nextcloud.override.yml" || a.cfg.Kuma.ServiceTokens["nextcloud"] != "nctok" {
-		t.Fatalf("serviço: %+v, token %q", sv, a.cfg.Kuma.ServiceTokens["nextcloud"])
+	if !ok || sv.Override != "nextcloud.override.yml" {
+		t.Fatalf("serviço: %+v", sv)
 	}
 	if b, err := os.ReadFile(filepath.Join(a.cfg.Paths.OverridesDir, "nextcloud.override.yml")); err != nil || !strings.Contains(string(b), "cron") {
 		t.Fatalf("override: %v %s", err, b)
 	}
 	if c, _ := LoadConfig(a.cfgPath); !slices.ContainsFunc(c.Services, func(s Service) bool { return s.Name == "nextcloud" }) {
 		t.Fatal("não gravou a config")
-	}
-	if v := string(*a.view.Load()); strings.Contains(v, "nctok") || !strings.Contains(v, `"kuma_token":true`) {
-		t.Fatalf("o estado mostra o token ou não diz que existe: %s", v)
 	}
 }
 
@@ -97,18 +94,18 @@ func TestServiceEdit(t *testing.T) {
 	if code, body := postTo(t, a.postService, nextcloud); code != 204 {
 		t.Fatalf("HTTP %d: %s", code, body)
 	}
-	edit := `{"name":"nextcloud","dir":"nextcloud","host":"cloud2.engmariz.com","wait_min":5,"stability_min":10,"icon":"","override_yaml":"","kuma_token":""}`
+	edit := `{"name":"nextcloud","dir":"nextcloud","host":"cloud2.engmariz.com","wait_min":5,"stability_min":10,"icon":"","override_yaml":""}`
 	underLock(a, func() { a.st.Services["nextcloud"] = &SvcState{State: Active} })
 	if code, _ := postTo(t, a.postService, edit); code != 409 {
 		t.Fatalf("mudou o endereço com o serviço em failover: %d", code)
 	}
 	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":15,"stability_min":10,"icon":"",
-		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":""}`
+		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n"}`
 	if code, body := postTo(t, a.postService, keep); code != 204 {
 		t.Fatalf("a espera em failover foi recusada: %d %s", code, body)
 	}
-	if sv, _ := a.service("nextcloud"); sv.WaitMin != 15 || a.cfg.Kuma.ServiceTokens["nextcloud"] != "nctok" {
-		t.Fatalf("%+v %q", sv, a.cfg.Kuma.ServiceTokens["nextcloud"])
+	if sv, _ := a.service("nextcloud"); sv.WaitMin != 15 {
+		t.Fatalf("%+v", sv)
 	}
 	underLock(a, func() { a.st.Services["nextcloud"].State = Normal })
 	if code, _ := postTo(t, a.postService, edit); code != 204 {
@@ -160,7 +157,7 @@ func TestServiceRemove(t *testing.T) {
 	if code, _ := postTo(t, a.postServiceRemove, `{"name":"nextcloud"}`); code != 204 {
 		t.Fatalf("remover: %d", code)
 	}
-	if _, ok := a.service("nextcloud"); ok || a.st.Services["nextcloud"] != nil || a.beats["nextcloud"] != nil || a.cfg.Kuma.ServiceTokens["nextcloud"] != "" {
+	if _, ok := a.service("nextcloud"); ok || a.st.Services["nextcloud"] != nil || a.beats["nextcloud"] != nil {
 		t.Fatal("ficou algo do serviço removido")
 	}
 	if code, _ := postTo(t, a.postServiceRemove, `{"name":"nextcloud"}`); code != 404 {
@@ -194,7 +191,7 @@ func TestServiceEditKeepsOverride(t *testing.T) {
 	underLock(a, func() { a.st.Services["nextcloud"] = &SvcState{State: Active} })
 	f.failCmd = []string{"docker compose -p failover-nextcloud"}
 	keep := `{"name":"nextcloud","dir":"nextcloud","host":"cloud.engmariz.com","wait_min":20,"stability_min":10,"icon":"",
-		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n","kuma_token":""}`
+		"override_yaml":"services:\n  cron:\n    profiles: [\"disabled\"]\n"}`
 	if code, body := postTo(t, a.postService, keep); code != 204 {
 		t.Fatalf("mudar só a espera em failover: HTTP %d %s", code, body)
 	}

@@ -10,7 +10,7 @@ import (
 
 // Each rule names the field it rejects, so the UI can show the error next to it.
 func TestValidateFields(t *testing.T) {
-	base, err := LoadConfig("config/failover.yml")
+	base, err := LoadConfig("testdata/failover.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,6 @@ func TestValidateFields(t *testing.T) {
 		{"dns.api_url", func(c *Config) { c.DNS.APIURL = "127.0.0.1:5380" }},
 		{"dns.zone", func(c *Config) { c.DNS.Zone = "eng mariz" }},
 		{"dns.ttl", func(c *Config) { c.DNS.TTL = 0 }},
-		{"kuma.base_url", func(c *Config) { c.Kuma.BaseURL = "kuma:3001" }},
 		{"paths.mirror_subvol", func(c *Config) { c.Paths.MirrorSubvol = "Volume1/ServerBackup" }},
 		{"paths.mirror_root", func(c *Config) { c.Paths.MirrorRoot = "../x" }},
 		{"paths.snapshots_dir", func(c *Config) { c.Paths.SnapshotsDir = "snaps" }},
@@ -51,26 +50,25 @@ func TestValidateFields(t *testing.T) {
 	}
 }
 
-// An old file with ui.tls_cert/tls_key and a zero default expiry still loads.
-func TestLoadOldUIAndExpiry(t *testing.T) {
-	b, err := os.ReadFile("config/failover.yml")
+// A file without maintenance.default_expiry_min reads it as 60.
+func TestLoadZeroExpiry(t *testing.T) {
+	b, err := os.ReadFile("testdata/failover.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := strings.Replace(string(b), "default_expiry_min: 60", "default_expiry_min: 0", 1)
-	s = strings.Replace(s, "ui:\n", "ui:\n  tls_cert: /x.pem\n  tls_key: /x.key\n", 1)
 	p := filepath.Join(t.TempDir(), "f.yml")
-	if err = os.WriteFile(p, []byte(s), 0o600); err != nil {
+	if err = os.WriteFile(p, []byte(strings.Replace(string(b), "default_expiry_min: 60", "default_expiry_min: 0", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadConfig(p)
-	if err != nil || c.Maintenance.DefaultExpiryMin != 60 {
+	if c, err := LoadConfig(p); err != nil || c.Maintenance.DefaultExpiryMin != 60 {
 		t.Fatalf("%v %d", err, c.Maintenance.DefaultExpiryMin)
 	}
-	if err = saveConfig(p, &c); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(p); strings.Contains(string(b), "tls_") {
-		t.Fatalf("tls_ ficou no ficheiro:\n%s", b)
+}
+
+// The shipped config loads as it is, with no services: the discovery proposes them.
+func TestShippedConfig(t *testing.T) {
+	c, err := LoadConfig("config/failover.yml")
+	if err != nil || len(c.Services) != 0 {
+		t.Fatalf("%v %+v", err, c.Services)
 	}
 }

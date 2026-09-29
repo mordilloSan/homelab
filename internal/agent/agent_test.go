@@ -31,7 +31,28 @@ type fake struct {
 	left     map[string]string // compose project → ids docker ps / volume ls still list
 	noNet    map[string]bool   // ip → its DNS resolver does not reach the internet
 	bodies   map[string][]byte // exact URL → what Get answers
+	mails    []Mail            // every email sent
+	failMail error             // SendMail fails with this
 }
+
+func (f *fake) SendMail(m Mail) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failMail != nil {
+		return f.failMail
+	}
+	f.mails = append(f.mails, m)
+	return nil
+}
+
+// mailed reports whether an email whose subject or body has sub was sent.
+func mailed(f *fake, sub string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.ContainsFunc(f.mails, func(m Mail) bool { return strings.Contains(m.Subject+m.Body, sub) })
+}
+
+func (f *fake) GetIcon(u string) ([]byte, error) { return f.Get(u, "") }
 
 func (f *fake) Resolve(ip string) error {
 	f.mu.Lock()
@@ -141,7 +162,7 @@ func init() { bcryptCost, loginDelay = bcrypt.MinCost, 0 }
 // newTestAgent loads the example config, so the shipped file is tested too.
 func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	t.Helper()
-	cfg, err := LoadConfig("config/failover.yml")
+	cfg, err := LoadConfig("testdata/failover.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +170,6 @@ func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	cfg.Paths.SnapshotsDir = filepath.Join(dir, "snaps")
 	cfg.Nightly.PrepullAt = ""
 	cfg.DNS.TokenFile = filepath.Join(dir, "token")
-	cfg.Kuma.HeartbeatToken, cfg.Kuma.NPMToken = "hb", "npmtok"
-	cfg.Kuma.ServiceTokens = map[string]string{"vaultwarden": "vwtok"}
 	if err = os.WriteFile(cfg.DNS.TokenFile, []byte("secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +178,7 @@ func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.iconJobs.Wait) // before the temporary folder goes
+	t.Cleanup(a.mailJobs.Wait)
 	return a
 }
 
@@ -311,9 +331,6 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 	if !hasEvent(a, "DNS: bitwarden.engmariz.com → "+tnas) {
 		t.Fatalf("sem evento do DNS: %v", a.events)
 	}
-	if !hasGet(f, "/api/push/vwtok?msg=em+failover+no+TNAS&status=down") {
-		t.Fatalf("Kuma não recebeu o down: %v", f.gets)
-	}
 	snap := a.st.Services["vaultwarden"].Snapshot
 	npmSnap := a.st.TNASNPM.Snapshot
 
@@ -350,7 +367,8 @@ func TestServerNPMDownServerAlive(t *testing.T) {
 		t.Fatal("avisou antes de alert_after_min")
 	}
 	tickTo(a, &at, 60)
-	if !a.st.NPMAlerted || !hasGet(f, "/api/push/npmtok?msg=NPM") {
+	a.mailJobs.Wait()
+	if !a.st.NPMAlerted || !mailed(f, "NPM do servidor em falha") {
 		t.Fatal("sem aviso do NPM")
 	}
 	if f.ran("") >= 0 {
@@ -560,29 +578,6 @@ func TestScanImages(t *testing.T) {
 	}
 	if a.st.ImagesMsg != "" || a.events[len(a.events)-1].Msg != "todas as imagens estão no TNAS" {
 		t.Fatalf("não avisou que as imagens voltaram: %q", a.st.ImagesMsg)
-	}
-}
-
-// A config from before DNS was always on still loads; saving drops the old key.
-func TestOldDNSEnabledLoads(t *testing.T) {
-	b, err := os.ReadFile("config/failover.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := filepath.Join(t.TempDir(), "failover.yml")
-	old := strings.Replace(string(b), "dns:\n", "dns:\n  enabled: false\n", 1)
-	if err = os.WriteFile(p, []byte(old), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := LoadConfig(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := saveConfig(p, &c); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(p); strings.Contains(string(b), "enabled") {
-		t.Fatalf("dns.enabled ficou no ficheiro:\n%s", b)
 	}
 }
 

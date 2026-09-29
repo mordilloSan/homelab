@@ -1,5 +1,4 @@
-# Criado assim no primeiro arranque, se não existir. A interface reescreve-o ao
-# guardar (os comentários perdem-se). O login da interface fica em user.yml.
+# A configuração dos testes: a de fábrica com os serviços do homelab.
 
 mode: observe                 # observe: só regista o que faria · auto: age
 server:
@@ -21,7 +20,35 @@ npm:
   dir: npm
   alert_after_min: 3                   # 2.3
 
-services: []                           # a descoberta propõe-nos na interface
+services:
+  - name: vaultwarden
+    dir: vaultwarden
+    host: bitwarden.engmariz.com
+    wait_min: 5
+    stability_min: 10
+  - name: homepage
+    dir: homepage
+    host: homepage.engmariz.com
+    wait_min: 10
+    stability_min: 10
+  - name: speedtest
+    dir: speedtest-tracker
+    host: speedtest.engmariz.com
+    wait_min: 30
+    stability_min: 10
+  - name: immich
+    dir: immich
+    host: immich.engmariz.com
+    wait_min: 15
+    stability_min: 10
+    override: immich.override.yml      # ML desligado
+  - name: unifi
+    dir: unifi
+    host: unifi.engmariz.com
+    wait_min: 15
+    stability_min: 0                   # minimiza o IP duplicado no regresso
+    override: unifi.override.yml       # parent ovs_eth0
+    require_free_ip: 192.168.1.92      # R3
 
 maintenance:
   default_expiry_min: 60
@@ -33,14 +60,14 @@ dns:
   ttl: 60
 
 
-email:                                 # avisos: em Definições → Avisos (Gmail: password de aplicação)
-  host: ""                             # vazio: sem avisos (Gmail: smtp.gmail.com)
+email:
+  host: smtp.test
   port: 587
-  security: starttls                   # starttls (587) · tls (465) · none (relay na LAN, sem login)
-  user: ""
-  password: ""
-  from: ""                             # vazio: o utilizador
-  to: ""                               # vazio: o utilizador
+  security: starttls
+  user: agente@test.pt
+  password: segredo
+  from: ""
+  to: miguel@engmariz.com
 
 nightly:
   prepull_at: "05:00"                  # depois do espelho das 04:30; "" desliga

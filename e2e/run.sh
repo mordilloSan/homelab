@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end test of the agent image against the local Docker.
 # The "server" and the TNAS NPM are Caddy containers on bridge networks;
-# btrfs is replaced by cp/rm (no btrfs here). DNS and Kuma are off.
+# btrfs is replaced by cp/rm (no btrfs here); a Caddy stands in for the
+# Technitium API and Mailpit takes the alert emails.
 # Covers T-04/T-05/T-06/T-11/T-12/T-19/T-20/T-21 minus btrfs. Takes ~3 min.
 #
 #   run.sh [test]   runs the test and removes everything
@@ -12,11 +13,11 @@ set -euo pipefail
 cmd=${1:-test}
 here=$(cd "$(dirname "$0")/.." && pwd)
 image=failover-agent-e2e
-pw="admin" # the default login, created by the agent in user.yml
+pw="e2e-password" # the account the test makes on the first access
 W=$here/.e2e
 
 cleanup() {
-	docker rm -f e2e-agent e2e-server e2e-ipholder e2e-dns >/dev/null 2>&1 || true
+	docker rm -f e2e-agent e2e-server e2e-ipholder e2e-dns e2e-mail >/dev/null 2>&1 || true
 	# every copy the agent started sits on e2e-tnas, whatever the service names were
 	local p
 	for p in $(docker ps -aq --filter network=e2e-tnas | xargs -r docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' | sort -u); do
@@ -102,6 +103,10 @@ cat >"$W/dns.Caddyfile" <<'EOF'
 EOF
 docker run -d --name e2e-dns --network e2e-tnas --ip 10.123.2.53 \
 	-v "$W/dns.Caddyfile:/etc/caddy/Caddyfile:ro" caddy:alpine >/dev/null
+# The mail server: SMTP on 1025 without TLS nor login, what it got on :8025/api.
+mail=10.123.2.25
+docker pull -q axllent/mailpit >/dev/null
+docker run -d --name e2e-mail --network e2e-tnas --ip $mail -p 127.0.0.1:18025:8025 axllent/mailpit >/dev/null
 
 # The mirror, as the TOS backup leaves it.
 m=$W/ServerBackup/homelab
@@ -152,6 +157,11 @@ EOF
 	echo "copia do espelho" >"$m/$name/html/index.html"
 	svc_config+="  - {name: $name, dir: $name, host: $host, wait_min: $wait, stability_min: $stab$override$free_ip}"$'\n'
 done
+# start: no services and no email, as a new install; the setup screen proposes them
+email="email: {host: $mail, port: 1025, security: none, to: e2e@test.pt}"
+if [[ $cmd == start ]]; then
+	svc_config="  []" email=""
+fi
 cat >"$W/btrfs" <<'EOF'
 #!/bin/sh
 # stand-in for: btrfs subvolume snapshot SRC DST | btrfs subvolume delete PATH
@@ -178,6 +188,7 @@ services:
 $svc_config
 dns: {api_url: "http://10.123.2.53:5380", token_file: $W/config/technitium.token, zone: e2e.test, ttl: 60}
 ui: {listen: "127.0.0.1:18099"}
+$email
 EOF
 
 run_agent() {
@@ -192,16 +203,35 @@ if [[ $cmd == test ]]; then
 fi
 run_agent
 
+end=$((SECONDS + 60))
+until curl -sfk -o /dev/null "$ui/healthz"; do
+	((SECONDS < end)) || {
+		echo "FALHOU: a interface não responde"
+		docker logs --tail 30 e2e-agent
+		exit 1
+	}
+	sleep 2
+done
 if [[ $cmd == start ]]; then
-	wait_for '.router_ok' 60 "interface a responder"
 	cat <<EOF
 
-Interface: https://localhost:18099  (admin / $pw; o browser avisa do certificado próprio)
+Interface: https://localhost:18099  (o browser avisa do certificado próprio)
+Primeiro acesso: cria a conta, depois "Configurar em 1 minuto" propõe os serviços.
+Avisos por email: "Outro servidor", $mail, porta 1025, ligação none, qualquer email;
+  chegam a http://localhost:18025 (Mailpit).
 Começa em observação: muda para automático na interface para ver o failover a sério.
 make server-down / make server-up simula a falha do servidor · make logs · make stop
 EOF
 	exit 0
 fi
+
+# the first access makes the account
+curl -sfk -o /dev/null -d username=admin -d "password=$pw" -d "password2=$pw" "$ui/setup"
+login || {
+	echo "FALHOU: a conta feita no primeiro acesso não entra"
+	exit 1
+}
+echo "ok: conta feita no primeiro acesso"
 
 wait_for '.services[0].state == "NORMAL" and .services[0].server_ok and .server_npm_ok' 40 "servidor saudável, nada a fazer"
 if [[ $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:18099/x) != "301 https://127.0.0.1:18099/x" ]]; then
@@ -232,6 +262,15 @@ body=$(curl -sk --resolve web.test:443:10.123.2.1 https://web.test/)
 	exit 1
 }
 echo "ok: a cópia serve os dados do snapshot pelo NPM do TNAS"
+end=$((SECONDS + 60))
+until curl -sf "http://$mail:8025/api/v1/messages" | jq -e '.messages | any(.Subject | test("em failover no TNAS")) and any(.To[].Address == "e2e@test.pt")' >/dev/null; do
+	((SECONDS < end)) || {
+		echo "FALHOU: sem email do failover: $(curl -s "http://$mail:8025/api/v1/messages" | jq -c '[.messages[] | .Subject]')"
+		exit 1
+	}
+	sleep 3
+done
+echo "ok: email do failover recebido"
 [[ $(project_containers failover-web) -eq 1 ]] || { # web only: ml disabled by the override
 	echo "FALHOU: o override não desligou o ml"
 	exit 1

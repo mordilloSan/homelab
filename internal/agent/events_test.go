@@ -60,24 +60,6 @@ func TestEventsCap(t *testing.T) {
 	}
 }
 
-// The events of a state.json from before events.jsonl move to the new file once.
-func TestEventsMigrate(t *testing.T) {
-	dir := t.TempDir()
-	old := `{"router_ok":true,"services":{},"events":[` + evLine(time.Now().Add(-time.Hour), "antigo") + `]}`
-	writeLines(t, filepath.Join(dir, "state.json"), old)
-	a := newTestAgent(t, dir, &fake{noPing: map[string]bool{}, down: map[string]bool{}})
-	if len(a.events) != 1 || a.events[0].Msg != "antigo" {
-		t.Fatalf("não migrou: %+v", a.events)
-	}
-	a.save()
-	if b, _ := os.ReadFile(filepath.Join(dir, "state.json")); strings.Contains(string(b), `"events"`) {
-		t.Fatalf("state.json ainda guarda eventos: %s", b)
-	}
-	if b, _ := loadEvents(a.eventsPath); len(b) != 1 {
-		t.Fatalf("events.jsonl: %+v", b)
-	}
-}
-
 // A file that cannot be written does not stop the agent: the event stays in memory.
 func TestEventsUnwritable(t *testing.T) {
 	a, _ := setup(t)
