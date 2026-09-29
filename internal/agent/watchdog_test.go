@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,5 +72,12 @@ func TestCrashedAlerts(t *testing.T) {
 	b.mailJobs.Wait()
 	if !mailed(f, "o agente reiniciou") {
 		t.Fatalf("sem email: %+v", f.mails)
+	}
+	b.mu.Lock()
+	b.st.Running = true
+	b.save()
+	b.mu.Unlock()
+	if c := newTestAgent(t, dir, f); strings.Count(c.alerts[0].Msg, "o agente reiniciou") != 1 {
+		t.Fatalf("dois reinícios seguidos encaixaram a mensagem: %s", c.alerts[0].Msg)
 	}
 }
