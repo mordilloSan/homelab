@@ -240,10 +240,31 @@ func TestHealthcheck(t *testing.T) {
 		if Healthcheck("0.0.0.0:"+port, other) == nil {
 			t.Errorf("%s: healthcheck ok com um certificado que não é o da interface", c.name)
 		}
-		if err := SelfCheck("0.0.0.0:" + port); err != nil { // the watchdog: whatever certificate is served
-			t.Errorf("%s: SelfCheck: %v", c.name, err)
-		}
 		tsrv.Close()
+	}
+}
+
+// The watchdog's check trusts the certificate the UI serves, even one that
+// was never saved, and no other.
+func TestSelfCheck(t *testing.T) {
+	a, _ := setup(t)
+	cfg, err := a.TLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsrv := httptest.NewUnstartedServer(a.Handler())
+	tsrv.TLS = cfg
+	tsrv.StartTLS()
+	defer tsrv.Close()
+	_, port, _ := net.SplitHostPort(tsrv.Listener.Addr().String())
+	if err := a.SelfCheck("0.0.0.0:" + port); err != nil {
+		t.Fatal(err)
+	}
+	other := httptest.NewTLSServer(a.Handler()) // another certificate
+	defer other.Close()
+	_, port, _ = net.SplitHostPort(other.Listener.Addr().String())
+	if a.SelfCheck("0.0.0.0:"+port) == nil {
+		t.Fatal("confiou num certificado que não é o da interface")
 	}
 }
 

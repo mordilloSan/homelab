@@ -16,14 +16,18 @@ var (
 	svgIcon = []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>`)
 )
 
-// A link given in the form is downloaded when the service is saved, kept in
-// the state folder and served from there; the page never goes out for it.
+// A dashboard-icons name given in the form (or its dashboardicons.com page)
+// is downloaded from the CDN when the service is saved, kept in the state
+// folder and served from there; the page never goes out for it.
 func TestServiceIconLink(t *testing.T) {
 	a, f := svcSetup(t)
-	f.bodies = map[string][]byte{"https://example.com/nc.png": pngIcon}
-	body := strings.Replace(nextcloud, `"icon":""`, `"icon":"https://example.com/nc.png"`, 1)
+	f.bodies = map[string][]byte{iconsCDN + "png/nextcloud-blue.png": pngIcon}
+	body := strings.Replace(nextcloud, `"icon":""`, `"icon":"https://dashboardicons.com/icons/nextcloud-blue"`, 1)
 	if code, got := postTo(t, a.postService, body); code != 204 {
 		t.Fatalf("HTTP %d %s", code, got)
+	}
+	if sv, _ := a.service("nextcloud"); sv.Icon != "nextcloud-blue" {
+		t.Fatalf("gravou %q, queria só o nome", sv.Icon)
 	}
 	if b, err := os.ReadFile(filepath.Join(a.iconDir(), "nextcloud")); err != nil || string(b) != string(pngIcon) {
 		t.Fatalf("ícone guardado: %v %q", err, b)
@@ -48,11 +52,12 @@ func TestServiceIconLink(t *testing.T) {
 	}
 }
 
-// A link that is not an image, or not a link, is refused in the form.
+// A link anywhere else, a name the CDN does not have or an answer that is
+// not an image is refused in the form; the agent never asks another host.
 func TestServiceIconRefused(t *testing.T) {
 	a, f := svcSetup(t)
-	f.bodies = map[string][]byte{"https://example.com/page": []byte("<html><body>olá</body></html>")}
-	for _, icon := range []string{"https://example.com/page", "cube", "ftp://x/y.png"} {
+	f.bodies = map[string][]byte{"https://example.com/nc.png": pngIcon, iconsCDN + "svg/pagina.svg": []byte("<html><body>olá</body></html>")}
+	for _, icon := range []string{"https://example.com/nc.png", "cube", "pagina", "ftp://dashboardicons.com/x.png", "../state"} {
 		body := strings.Replace(nextcloud, `"icon":""`, `"icon":"`+icon+`"`, 1)
 		if code, got := postTo(t, a.postService, body); code != 400 || !strings.Contains(got, `"field":"icon"`) {
 			t.Errorf("%s: HTTP %d %s", icon, code, got)
@@ -81,19 +86,37 @@ func TestServiceIconGuess(t *testing.T) {
 	if got := iconType(svgIcon); got != "image/svg+xml" {
 		t.Fatalf("svg: %s", got)
 	}
+	for _, u := range f.gets {
+		if !strings.HasPrefix(u, iconsCDN) {
+			t.Errorf("pediu %s", u)
+		}
+	}
 }
 
-// A link that went down does not stop the service from being edited: the
-// stored icon stays.
+func TestIconName(t *testing.T) {
+	for in, want := range map[string]string{
+		"speedtest-tracker": "speedtest-tracker", "Jellyfin": "jellyfin",
+		"https://dashboardicons.com/icons/home-assistant":                                   "home-assistant",
+		"https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/speedtest-tracker.png": "speedtest-tracker",
+		"https://example.com/logo.png":                                                      "", "https://cdn.jsdelivr.net/gh/outro/x.png": "", "a/b": "", "..": "",
+	} {
+		if got, ok := iconName(in); ok != (want != "") || ok && got != want {
+			t.Errorf("%q: %q %v, queria %q", in, got, ok, want)
+		}
+	}
+}
+
+// The CDN down does not stop the service from being edited: the stored icon
+// stays.
 func TestServiceIconLinkDown(t *testing.T) {
 	a, f := svcSetup(t)
-	f.bodies = map[string][]byte{"https://example.com/nc.png": pngIcon}
-	body := strings.Replace(nextcloud, `"icon":""`, `"icon":"https://example.com/nc.png"`, 1)
+	f.bodies = map[string][]byte{iconsCDN + "png/nextcloud-blue.png": pngIcon}
+	body := strings.Replace(nextcloud, `"icon":""`, `"icon":"nextcloud-blue"`, 1)
 	if code, got := postTo(t, a.postService, body); code != 204 {
 		t.Fatalf("HTTP %d %s", code, got)
 	}
-	delete(f.bodies, "https://example.com/nc.png")
-	f.getErr = map[string]error{"https://example.com/": errors.New("timeout")}
+	delete(f.bodies, iconsCDN+"png/nextcloud-blue.png")
+	f.getErr = map[string]error{iconsCDN: errors.New("timeout")}
 	edit := strings.Replace(strings.Replace(body, `"new":true,`, "", 1), `"wait_min":5`, `"wait_min":15`, 1)
 	if code, got := postTo(t, a.postService, edit); code != 204 {
 		t.Fatalf("editar com o link em baixo: HTTP %d %s", code, got)

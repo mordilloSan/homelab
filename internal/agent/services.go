@@ -72,21 +72,24 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	// The icon's link is downloaded before the lock: it may take seconds. The
-	// same link as saved, with its icon kept, is not asked again: a link gone
-	// down must not stop the service from being edited.
+	// The icon is downloaded before the lock: it may take seconds. The same
+	// as saved, with its icon kept, is not asked again: the CDN down must not
+	// stop the service from being edited.
 	a.mu.Lock()
 	prev, _ := a.service(req.Name)
 	a.mu.Unlock()
 	var iconBytes []byte
-	req.Icon = strings.TrimSpace(req.Icon)
-	if req.Icon != "" && (req.Icon != prev.Icon || a.iconV(req.Name) == "") {
-		if !isURL(req.Icon) {
-			fieldErr(w, "icon", "tem de ser um link http:// ou https:// para uma imagem")
+	if req.Icon = strings.TrimSpace(req.Icon); req.Icon != "" {
+		n, ok := iconName(req.Icon)
+		if !ok {
+			fieldErr(w, "icon", "tem de ser o nome de um ícone do dashboardicons.com (por exemplo speedtest-tracker) ou o link da sua página")
 			return
 		}
+		req.Icon = n
+	}
+	if req.Icon != "" && (req.Icon != prev.Icon || a.iconV(req.Name) == "") {
 		var err error
-		if iconBytes, err = a.downloadIcon([]string{req.Icon}); err != nil {
+		if iconBytes, err = a.downloadIcon(iconSources(Service{Name: req.Name, Icon: req.Icon})); err != nil {
 			fieldErr(w, "icon", "não consegui usar este ícone: "+err.Error())
 			return
 		}

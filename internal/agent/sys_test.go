@@ -68,27 +68,3 @@ func TestComposeDownByProjectName(t *testing.T) {
 		t.Fatalf("sobraram %d containers e %d volumes", c, v)
 	}
 }
-
-// Icon downloads never reach the TNAS itself (loopback) or link-local
-// addresses: the check is on the connection, so a redirect or a name that
-// resolves there is refused too. The LAN stays reachable (a LAN favicon).
-func TestRefuseLocal(t *testing.T) {
-	for addr, refused := range map[string]bool{
-		"127.0.0.1:5380": true, "[::1]:443": true, "169.254.169.254:80": true, "0.0.0.0:80": true, "[fe80::1]:80": true,
-		"192.168.1.66:443": false, "104.16.85.20:443": false,
-	} {
-		if err := refuseLocal("tcp4", addr, nil); (err != nil) != refused {
-			t.Errorf("%s: %v", addr, err)
-		}
-	}
-}
-
-func TestGetIconRefusesLoopback(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\n"))
-	}))
-	defer srv.Close()
-	if _, err := (RealSys{}).GetIcon(srv.URL); err == nil || !strings.Contains(err.Error(), "local") {
-		t.Fatalf("descarregou um ícone do próprio TNAS: %v", err)
-	}
-}

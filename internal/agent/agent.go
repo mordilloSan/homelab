@@ -36,7 +36,7 @@ type Service struct {
 	StabilityMin  int    `yaml:"stability_min" json:"stability_min"`
 	Override      string `yaml:"override,omitempty" json:"override,omitempty"`
 	RequireFreeIP string `yaml:"require_free_ip,omitempty" json:"require_free_ip,omitempty"`
-	Icon          string `yaml:"icon,omitempty" json:"icon,omitempty"` // a link to an image; empty: dashboard-icons by name or folder
+	Icon          string `yaml:"icon,omitempty" json:"icon,omitempty"` // a dashboard-icons name; empty: by the service's name or folder
 }
 
 type Config struct {
@@ -184,7 +184,7 @@ func (c *Config) validateService(s Service, seen map[string]bool) error {
 		{s.StabilityMin < 0, "stability_min", "não pode ser negativa"},
 		{s.RequireFreeIP != "" && !isIP(s.RequireFreeIP), "require_free_ip", "tem de ser um endereço IP"},
 		{s.RequireFreeIP != "" && c.LANIface == "", "require_free_ip", "precisa da interface da LAN (Definições → Rede)"},
-		{s.Icon != "" && !isURL(s.Icon), "icon", "tem de ser um link http:// ou https:// para uma imagem"},
+		{s.Icon != "" && !isIconName(s.Icon), "icon", "tem de ser o nome de um ícone do dashboardicons.com"},
 	} {
 		if r.bad {
 			return fe(r.field, r.msg)
@@ -290,7 +290,7 @@ type System interface {
 	Check(host, ip string) error                        // https://host with the connection sent to ip (curl --resolve)
 	Get(url, bearer string) ([]byte, error)
 	Resolve(ip string) error            // the resolver at ip answers for a name from the internet
-	GetIcon(url string) ([]byte, error) // like Get, never to the TNAS itself or link-local
+	GetIcon(url string) ([]byte, error) // like Get, for the icons' CDN
 	SendMail(m Mail) error
 }
 

@@ -1150,7 +1150,7 @@ function svcEditPanel() {
     <div class="node-id"><h2 id="panelTitle">${isNew ? 'Novo serviço' : `Editar ${esc(s.name)}`}</h2><span class="muted">${isNew ? 'Uma pasta do espelho com docker-compose.yml' : mono(s.host)}</span></div>`;
   if (!panel.data) return {head, body: '<p class="note-text" style="padding-top:20px">A carregar…</p>'};
   const pre = !s && panel.prefill ? discOf(panel.prefill) : null;
-  const v = s || {name: pre?.name || '', dir: pre?.dir || '', host: pre?.host || '', wait_min: 5, stability_min: 10, icon: '', require_free_ip: pre?.require_free_ip || ''};
+  const v = s || {name: pre?.name || '', dir: pre?.dir || '', host: pre?.host || '', wait_min: 2, stability_min: 2, icon: '', require_free_ip: pre?.require_free_ip || ''};
   if (pre && !panel.data.override) panel.data.override = pre.override_yaml || '';
   const home = isNew || s.state === 'NORMAL';
   const dirs = panel.data.dirs.map(d => d.dir);
@@ -1164,8 +1164,8 @@ function svcEditPanel() {
       ${field('name', 'Nome', `<input name="name" value="${esc(v.name)}" ${isNew ? 'required' : 'disabled'} spellcheck="false" pattern="[a-z0-9][a-z0-9_-]*">`,
         isNew ? 'Minúsculas, números, - e _. Não muda depois: entra nos nomes dos projetos e dos snapshots.' : 'Não muda. Para outro nome, remove e adiciona.')}
       ${field('icon', 'Ícone', `<span class="icon-url"><span class="svc-icon">${isNew ? icon('cube') : svcIcon(s.name)}</span>
-        <input name="icon" value="${esc(v.icon)}" placeholder="https://…/logo.svg" spellcheck="false" inputmode="url"></span>`,
-        'Um link para uma imagem (SVG, PNG, WebP…): o agente descarrega-a uma vez e guarda-a, a página nunca vai à internet. Vazio: o ícone do <a href="https://github.com/homarr-labs/dashboard-icons" target="_blank" rel="noopener">dashboard-icons</a> com o nome do serviço ou da pasta, se existir.')}
+        <input name="icon" value="${esc(v.icon)}" placeholder="${esc(v.name || 'speedtest-tracker')}" spellcheck="false" autocapitalize="off"></span>`,
+        'O nome de um ícone do <a href="https://dashboardicons.com" target="_blank" rel="noopener">dashboardicons.com</a> (por exemplo speedtest-tracker), ou o link da sua página. O agente descarrega-o uma vez e guarda-o; a página nunca vai à internet. Vazio: o do nome do serviço ou da pasta, se existir.')}
     </fieldset></div>
     <div class="sec"><h3>No failover</h3><fieldset ${home ? '' : 'disabled'}>
       ${home ? '' : '<p class="note-text">A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.</p>'}
@@ -1472,7 +1472,7 @@ async function protectPicked(picked) {
   const failed = [];
   for (const x of picked) {
     const r = toLogin(await fetch('api/service', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
-      new: true, name: x.name, dir: x.dir, host: x.host, wait_min: 5, stability_min: 10, icon: '', override_yaml: x.override_yaml || '',
+      new: true, name: x.name, dir: x.dir, host: x.host, wait_min: 2, stability_min: 2, icon: '', override_yaml: x.override_yaml || '',
       require_free_ip: x.require_free_ip || ''})}));
     if (!r.ok) failed.push(`${x.name}: ${(await readErr(r)).error}`);
   }

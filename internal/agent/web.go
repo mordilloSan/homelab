@@ -120,15 +120,29 @@ func Healthcheck(listen, certFile string) error {
 	return healthz(u, tr)
 }
 
-// SelfCheck is Healthcheck for the agent's own watchdog: it asks whether the
-// page answers, not whether the certificate on disk is the one served (one
-// that could not be saved lives only in memory).
-func SelfCheck(listen string) error {
+// SelfCheck is Healthcheck for the agent's own watchdog: it trusts the
+// certificate the UI serves, from memory, since one that could not be saved
+// is not the one on disk.
+func (a *Agent) SelfCheck(listen string) error {
 	u, err := UIURL(listen, "127.0.0.1", true)
 	if err != nil {
 		return err
 	}
-	return healthz(u, &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}) //nolint:gosec // its own loopback, only for liveness
+	s := a.certs.Load()
+	if s == nil {
+		return errors.New("a interface não tem certificado")
+	}
+	if _, err = s.get(nil); err != nil { // makes it if no handshake did yet
+		return err
+	}
+	s.mu.Lock()
+	leaf := s.leaf
+	s.mu.Unlock()
+	cfg, err := trustLeaf(leaf)
+	if err != nil {
+		return err
+	}
+	return healthz(u, &http.Transport{TLSClientConfig: cfg})
 }
 
 func healthz(u string, tr *http.Transport) error {
@@ -152,14 +166,19 @@ func trustOnly(certFile string) (*tls.Config, error) {
 		return nil, fmt.Errorf("certificado da interface: %w", err)
 	}
 	blk, _ := pem.Decode(b)
-	pool := x509.NewCertPool()
-	if blk == nil || !pool.AppendCertsFromPEM(b) {
+	if blk == nil {
 		return nil, errors.New("certificado da interface ilegível")
 	}
 	leaf, err := x509.ParseCertificate(blk.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("certificado da interface: %w", err)
 	}
+	return trustLeaf(leaf)
+}
+
+func trustLeaf(leaf *x509.Certificate) (*tls.Config, error) {
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
 	var name string
 	switch {
 	case len(leaf.DNSNames) > 0:

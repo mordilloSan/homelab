@@ -7,15 +7,19 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 )
 
-// Service icons: a link given in the form, or else the icon dashboard-icons
-// has for the service's name or folder (what Homepage and Homarr use). The
+// Service icons come from dashboard-icons (dashboardicons.com, what Homepage
+// and Homarr use): the one named in the form, or else the service's name and
+// then its folder. Only from its CDN, never a link of anyone's choosing. The
 // agent downloads it once into the state folder and the page gets it from
 // there, never from the internet.
 const (
@@ -36,15 +40,43 @@ func (a *Agent) iconPath(name string) (string, bool) {
 	return filepath.Join(a.iconDir(), name), true
 }
 
-// iconSources is where a service's icon comes from, in order: its link, or
-// dashboard-icons by name and then by folder, SVG first (not every icon has
-// one) and then PNG.
-func iconSources(sv Service) []string {
-	if sv.Icon != "" {
-		return []string{sv.Icon}
+var reIconName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
+
+// iconName is the dashboard-icons name in s: the name itself, or a link to
+// its page on dashboardicons.com or to its file on the CDN. false for
+// anything else.
+func iconName(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+			return "", false
+		}
+		switch h := strings.TrimPrefix(u.Hostname(), "www."); {
+		case h == "dashboardicons.com", h == "cdn.jsdelivr.net" && strings.HasPrefix(u.Path, "/gh/homarr-labs/dashboard-icons"):
+		default:
+			return "", false
+		}
+		s = path.Base(u.Path)
+		if ext := path.Ext(s); slices.Contains([]string{".svg", ".png", ".webp"}, ext) {
+			s = strings.TrimSuffix(s, ext)
+		}
 	}
+	s = strings.ToLower(s)
+	return s, reIconName.MatchString(s) && !strings.Contains(s, "..")
+}
+
+// isIconName: s is already a dashboard-icons name, as saved.
+func isIconName(s string) bool { n, ok := iconName(s); return ok && n == s }
+
+// iconSources is where a service's icon comes from, in order: the name given,
+// or its name and then its folder, SVG first (not every icon has one) and
+// then PNG.
+func iconSources(sv Service) []string {
 	names := []string{sv.Name}
-	if d := filepath.Base(sv.Dir); d != sv.Name && validName.MatchString(d) {
+	if n, ok := iconName(sv.Icon); ok && sv.Icon != "" {
+		names = []string{n}
+	} else if d := filepath.Base(sv.Dir); d != sv.Name && validName.MatchString(d) {
 		names = append(names, d)
 	}
 	var out []string
