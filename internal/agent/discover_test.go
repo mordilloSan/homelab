@@ -213,7 +213,7 @@ func discoverSetup(t *testing.T) (*Agent, *fake) {
 	t.Helper()
 	a, f := svcSetup(t)
 	root := filepath.Join(a.cfg.Paths.MirrorSubvol, a.cfg.Paths.MirrorRoot)
-	for _, d := range []string{"vaultwarden", "unifi", "immich", "npm", "partido"} {
+	for _, d := range []string{"vaultwarden", "unifi", "immich", "npm", "partido", "vazio", "speedtest-tracker"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -230,6 +230,7 @@ func discoverSetup(t *testing.T) (*Agent, *fake) {
 		"2": "server {\n set $server immich_server;\n set $port 2283;\n server_name immich.engmariz.com;\n}\n",
 		"3": "server {\n set $server 192.168.1.92;\n set $port 8443;\n server_name unifi.engmariz.com;\n}\n",
 		"4": "server {\n set $server 192.168.1.66;\n set $port 81;\n server_name nginx.engmariz.com;\n}\n",
+		"5": "server {\n set $server \"speedtest\";\n set $port 80;\n server_name speedtest.engmariz.com;\n}\n", // the container's hostname
 	} {
 		if err := os.WriteFile(filepath.Join(ph, n+".conf"), []byte(c), 0o600); err != nil {
 			t.Fatal(err)
@@ -247,7 +248,8 @@ func discoverSetup(t *testing.T) (*Agent, *fake) {
 	vwJSON := `{"name":"vw","services":{"vaultwarden":{"container_name":"vaultwarden","ports":[{"published":"8080","target":80}]}}}`
 	npmJSON := `{"name":"npm","services":{"app":{"container_name":"npm","ports":[{"published":"81"},{"published":"443"}]}}}`
 	at := func(d string) string { return "docker compose -f " + filepath.Join(root, d, "docker-compose.yml") }
-	f.outs = map[string]string{at("vaultwarden"): vwJSON, at("unifi"): unifiJSON, at("immich"): immichJSON, at("npm"): npmJSON}
+	f.outs = map[string]string{at("vaultwarden"): vwJSON, at("unifi"): unifiJSON, at("immich"): immichJSON, at("npm"): npmJSON, at("vazio"): `{"name":"vazio","services":{}}`,
+		at("speedtest-tracker"): `{"name":"speedtest-tracker","services":{"speedtest-tracker":{"container_name":"speedtest-tracker","hostname":"speedtest"}}}`}
 	api := strings.TrimRight(a.cfg.DNS.APIURL, "/")
 	f.bodies = map[string][]byte{
 		api + "/api/zones/list?": []byte(`{"status":"ok","response":{"zones":[{"name":"engmariz.com","type":"Primary","internal":false},{"name":"0.in-addr.arpa","type":"Primary","internal":true}]}}`),
@@ -263,7 +265,7 @@ func TestDiscover(t *testing.T) {
 	if n.RouterIP != "192.168.1.1" || n.TNASIP != "192.168.1.249" || n.LANIface != "ovs_eth0" || n.ServerIP != "192.168.1.66" || n.NPMCheckHost != "nginx.engmariz.com" {
 		t.Fatalf("rede: %+v", n)
 	}
-	if d.DNS.Zone != "engmariz.com" || !d.NPM.Found || d.NPM.ProxyHosts != 4 || !d.Mirror.Found {
+	if d.DNS.Zone != "engmariz.com" || !d.NPM.Found || d.NPM.ProxyHosts != 5 || !d.Mirror.Found {
 		t.Fatalf("dns %+v npm %+v espelho %+v", d.DNS, d.NPM, d.Mirror)
 	}
 	by := map[string]discoveredService{}
@@ -284,6 +286,12 @@ func TestDiscover(t *testing.T) {
 	}
 	if s := by["partido"]; s.Error == "" || s.Host != "" {
 		t.Errorf("uma pasta que não resolve devia dar erro sem estragar as outras: %+v", s)
+	}
+	if s := by["speedtest-tracker"]; s.Host != "speedtest.engmariz.com" {
+		t.Errorf("o NPM aponta para o hostname do contentor: %+v", s)
+	}
+	if s := by["vazio"]; !strings.Contains(s.Error, "nenhum serviço") || slices.ContainsFunc(s.Notes, func(n string) bool { return strings.Contains(n, "proxy host") }) {
+		t.Errorf("um compose sem serviços: %+v", s)
 	}
 }
 
