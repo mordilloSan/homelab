@@ -149,3 +149,124 @@ func TestSlugName(t *testing.T) {
 		}
 	}
 }
+
+// discoverSetup: a mirror with vaultwarden, unifi, immich, the NPM (with its
+// proxy hosts), a compose that does not resolve and a folder without one; a
+// route table and interfaces like the TNAS's.
+func discoverSetup(t *testing.T) (*Agent, *fake) {
+	t.Helper()
+	a, f := svcSetup(t)
+	root := filepath.Join(a.cfg.Paths.MirrorSubvol, a.cfg.Paths.MirrorRoot)
+	for _, d := range []string{"vaultwarden", "unifi", "immich", "npm", "partido"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, d, "docker-compose.yml"), []byte("services: {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ph := filepath.Join(root, "npm", "data", "nginx", "proxy_host")
+	if err := os.MkdirAll(ph, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for n, c := range map[string]string{
+		"1": "server {\n set $server \"192.168.1.66\";\n set $port 8080;\n server_name bitwarden.engmariz.com;\n}\n",
+		"2": "server {\n set $server immich_server;\n set $port 2283;\n server_name immich.engmariz.com;\n}\n",
+		"3": "server {\n set $server 192.168.1.92;\n set $port 8443;\n server_name unifi.engmariz.com;\n}\n",
+		"4": "server {\n set $server 192.168.1.66;\n set $port 81;\n server_name nginx.engmariz.com;\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(ph, n+".conf"), []byte(c), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	route := filepath.Join(t.TempDir(), "route")
+	if err := os.WriteFile(route, []byte(procRoute), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.procRoute = route
+	_, lan, _ := net.ParseCIDR("192.168.1.0/24")
+	a.ifaces = func() []ifaceAddr {
+		return []ifaceAddr{{"ovs_eth0", []*net.IPNet{{IP: net.ParseIP("192.168.1.249"), Mask: lan.Mask}}}}
+	}
+	vwJSON := `{"name":"vaultwarden","services":{"vaultwarden":{"container_name":"vaultwarden","ports":[{"published":"8080","target":80}]}}}`
+	npmJSON := `{"name":"npm","services":{"app":{"container_name":"npm","ports":[{"published":"81"},{"published":"443"}]}}}`
+	f.outs = map[string]string{
+		"docker compose -p discover-vaultwarden": vwJSON, "docker compose -p discover-unifi": unifiJSON,
+		"docker compose -p discover-immich": immichJSON, "docker compose -p discover-npm": npmJSON,
+	}
+	api := strings.TrimRight(a.cfg.DNS.APIURL, "/")
+	f.bodies = map[string][]byte{
+		api + "/api/zones/list?": []byte(`{"status":"ok","response":{"zones":[{"name":"engmariz.com","type":"Primary","internal":false},{"name":"0.in-addr.arpa","type":"Primary","internal":true}]}}`),
+		api + "/api/zones/records/get?domain=%2A.engmariz.com&zone=engmariz.com": []byte(`{"status":"ok","response":{"records":[{"name":"*.engmariz.com","type":"A","rData":{"ipAddress":"192.168.1.66"}}]}}`),
+	}
+	return a, f
+}
+
+func TestDiscover(t *testing.T) {
+	a, _ := discoverSetup(t)
+	d := a.discover()
+	n := d.Network
+	if n.RouterIP != "192.168.1.1" || n.TNASIP != "192.168.1.249" || n.LANIface != "ovs_eth0" || n.ServerIP != "192.168.1.66" || n.NPMCheckHost != "nginx.engmariz.com" {
+		t.Fatalf("rede: %+v", n)
+	}
+	if d.DNS.Zone != "engmariz.com" || !d.NPM.Found || d.NPM.ProxyHosts != 4 || !d.Mirror.Found {
+		t.Fatalf("dns %+v npm %+v espelho %+v", d.DNS, d.NPM, d.Mirror)
+	}
+	by := map[string]discoveredService{}
+	for _, s := range d.Services {
+		by[s.Dir] = s
+	}
+	if by["npm"].Dir != "" || by["vaultwarden"].Dir == "" || by["unifi"].Dir == "" || by["immich"].Dir == "" || by["partido"].Dir == "" {
+		t.Fatalf("serviços: %+v", d.Services)
+	}
+	if s := by["vaultwarden"]; s.Host != "bitwarden.engmariz.com" || !s.Configured || s.Name != "vaultwarden" {
+		t.Errorf("vaultwarden: %+v", s)
+	}
+	if s := by["unifi"]; s.Host != "unifi.engmariz.com" || s.RequireFreeIP != "192.168.1.92" || !strings.Contains(s.OverrideYAML, "parent: ovs_eth0") {
+		t.Errorf("unifi: %+v", s)
+	}
+	if s := by["immich"]; s.Host != "immich.engmariz.com" || !strings.Contains(s.OverrideYAML, "immich-machine-learning") || len(s.Notes) == 0 {
+		t.Errorf("immich: %+v", s)
+	}
+	if s := by["partido"]; s.Error == "" || s.Host != "" {
+		t.Errorf("uma pasta que não resolve devia dar erro sem estragar as outras: %+v", s)
+	}
+}
+
+// No route (no network yet) and no NPM: empty values, not errors.
+func TestDiscoverNothing(t *testing.T) {
+	a, _ := svcSetup(t)
+	a.procRoute = filepath.Join(t.TempDir(), "nao-existe")
+	a.ifaces = func() []ifaceAddr { return nil }
+	d := a.discover()
+	if d.Network.RouterIP != "" || d.NPM.Found || d.Services == nil {
+		t.Fatalf("%+v", d)
+	}
+}
+
+// The Technitium login makes a token and keeps it; the password is never kept.
+func TestTechnitiumLogin(t *testing.T) {
+	a, f := setup(t)
+	api := strings.TrimRight(a.cfg.DNS.APIURL, "/")
+	f.bodies = map[string][]byte{
+		api + "/api/user/createToken?pass=certa&tokenName=failover-agent&user=admin":  []byte(`{"status":"ok","username":"admin","tokenName":"failover-agent","token":"novo-token"}`),
+		api + "/api/user/createToken?pass=errada&tokenName=failover-agent&user=admin": []byte(`{"status":"error","errorMessage":"Invalid username or password."}`),
+	}
+	if code, body := postTo(t, a.postTechnitiumLogin, `{"user":"admin","pass":"errada"}`); code != 400 || !strings.Contains(body, "Invalid username") {
+		t.Fatalf("password errada: HTTP %d %s", code, body)
+	}
+	if b, _ := os.ReadFile(a.cfg.DNS.TokenFile); strings.TrimSpace(string(b)) != "secret" {
+		t.Fatal("uma recusa mudou o token")
+	}
+	if code, body := postTo(t, a.postTechnitiumLogin, `{"user":"admin","pass":"certa"}`); code != 204 {
+		t.Fatalf("HTTP %d %s", code, body)
+	}
+	if b, _ := os.ReadFile(a.cfg.DNS.TokenFile); strings.TrimSpace(string(b)) != "novo-token" {
+		t.Fatalf("token: %q", b)
+	}
+	for _, p := range []string{a.cfgPath, a.statePath, a.cfg.DNS.TokenFile} {
+		if b, _ := os.ReadFile(p); strings.Contains(string(b), "certa") {
+			t.Fatalf("a password ficou em %s", p)
+		}
+	}
+}

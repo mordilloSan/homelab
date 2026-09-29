@@ -321,10 +321,12 @@ type Agent struct {
 	restart    func()                 // ends Run so Docker starts the agent again (SetRestart)
 	listening  string                 // the UI's address in use, which a saved ui.listen may differ from
 	certs      atomic.Pointer[certStore]
-	iconMu     sync.Mutex        // guards iconRev and the icon files; never held while taking mu
-	iconRev    map[string]string // service → version of its stored icon, for the page's cache
-	iconJobs   sync.WaitGroup    // fetchIcons in the background (tests wait for it)
-	iconPass   sync.Mutex        // one fetchIcons pass at a time // set when the UI serves TLS
+	iconMu     sync.Mutex         // guards iconRev and the icon files; never held while taking mu
+	iconRev    map[string]string  // service → version of its stored icon, for the page's cache
+	iconJobs   sync.WaitGroup     // fetchIcons in the background (tests wait for it)
+	iconPass   sync.Mutex         // one fetchIcons pass at a time
+	procRoute  string             // the route table the discovery reads (tests set another)
+	ifaces     func() []ifaceAddr // set when the UI serves TLS
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool
@@ -368,6 +370,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	a.trimEvents()
 	a.tnasIP.Store(&cfg.TNASIP)
 	a.iconRev = map[string]string{}
+	a.procRoute, a.ifaces = "/proc/net/route", systemIfaces
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
 	if err != nil {

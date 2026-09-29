@@ -3,17 +3,23 @@ package agent
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Discovery: what the TNAS can find out by itself, so the settings are
@@ -223,6 +229,15 @@ type composeService struct {
 	} `json:"deploy"`
 }
 
+// hardware: the service asks for a GPU or devices of the machine it runs on.
+func (s composeService) hardware() bool {
+	has := func(r json.RawMessage) bool {
+		v := strings.TrimSpace(string(r))
+		return v != "" && v != "null" && v != "[]"
+	}
+	return has(s.Devices) || has(s.Gpus) || has(s.Deploy.Resources.Reservations.Devices) || s.Runtime == "nvidia"
+}
+
 func (info *composeInfo) addService(project, k string, s composeService) {
 	for _, n := range []string{k, s.ContainerName} {
 		if n != "" {
@@ -247,11 +262,7 @@ func (info *composeInfo) addService(project, k string, s composeService) {
 			}
 		}
 	}
-	has := func(r json.RawMessage) bool {
-		v := strings.TrimSpace(string(r))
-		return v != "" && v != "null" && v != "[]"
-	}
-	if has(s.Devices) || has(s.Gpus) || has(s.Deploy.Resources.Reservations.Devices) || s.Runtime == "nvidia" {
+	if s.hardware() {
 		info.heavy = append(info.heavy, k)
 	}
 	if s.NetworkMode == "host" {
@@ -333,4 +344,273 @@ func slugName(dir string) string {
 	s := reDashes.ReplaceAllString(b.String(), "-")
 	s = strings.TrimLeft(s, "-_")
 	return strings.TrimRight(s, "-")
+}
+
+// discovery is what GET /api/discover answers: proposals, never saved by it.
+type discovery struct {
+	Network struct {
+		RouterIP     string `json:"router_ip"`
+		TNASIP       string `json:"tnas_ip"`
+		LANIface     string `json:"lan_iface"`
+		ServerIP     string `json:"server_ip"`
+		NPMCheckHost string `json:"npm_check_host"`
+	} `json:"network"`
+	DNS struct {
+		Zone  string   `json:"zone"`
+		Zones []string `json:"zones"`
+	} `json:"dns"`
+	NPM struct {
+		Found      bool `json:"found"`
+		ProxyHosts int  `json:"proxy_hosts"`
+	} `json:"npm"`
+	Mirror struct {
+		Found bool   `json:"found"`
+		Root  string `json:"root"`
+	} `json:"mirror"`
+	Services []discoveredService `json:"services"`
+}
+
+type discoveredService struct {
+	Dir           string   `json:"dir"`
+	Name          string   `json:"name"`
+	Host          string   `json:"host"`
+	Hosts         []string `json:"hosts,omitempty"`
+	OverrideYAML  string   `json:"override_yaml,omitempty"`
+	RequireFreeIP string   `json:"require_free_ip,omitempty"`
+	Notes         []string `json:"notes,omitempty"`
+	Configured    bool     `json:"configured"`
+	Error         string   `json:"error,omitempty"`
+}
+
+// mirrorDirs are the folders of the mirror with a docker-compose.yml, but the NPM's.
+func mirrorDirs(root, npm string) []string {
+	var out []string
+	ents, _ := os.ReadDir(root) // sorted; unreadable is none
+	for _, e := range ents {
+		if e.IsDir() && e.Name() != npm && fileExists(filepath.Join(root, e.Name(), "docker-compose.yml")) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// resolveCompose is `docker compose config --format json` of a folder of the
+// mirror, read by analyzeCompose.
+func (a *Agent) resolveCompose(root, dir, lan string) (composeInfo, error) {
+	name := cmp.Or(slugName(dir), "x")
+	out, err := a.sys.Output("docker", "compose", "-p", "discover-"+name, "-f", filepath.Join(root, dir, "docker-compose.yml"), "config", "--format", "json")
+	if err != nil {
+		return composeInfo{}, err
+	}
+	return analyzeCompose([]byte(out), lan)
+}
+
+// discover gathers what the TNAS can see: its network, the NPM's proxy hosts
+// and the composes in the mirror, the Technitium's zones. Outside mu: it runs
+// docker compose once per folder.
+func (a *Agent) discover() discovery {
+	a.mu.Lock()
+	c := a.cfg
+	a.mu.Unlock()
+	var d discovery
+	route, _ := os.ReadFile(a.procRoute)
+	d.Network.RouterIP = defaultRoute(route)
+	d.Network.TNASIP, d.Network.LANIface = lanOf(a.ifaces(), net.ParseIP(d.Network.RouterIP))
+
+	root := filepath.Join(c.Paths.MirrorSubvol, c.Paths.MirrorRoot)
+	d.Mirror.Root = root
+	_, err := os.Stat(root)
+	d.Mirror.Found = err == nil
+	hosts := readProxyHosts(findProxyHostDir(filepath.Join(root, c.NPM.Dir)))
+	d.NPM.Found, d.NPM.ProxyHosts = len(hosts) > 0, len(hosts)
+
+	dirs := mirrorDirs(root, c.NPM.Dir)
+	infos, errs := make([]composeInfo, len(dirs)), make([]error, len(dirs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4) // a few composes at a time
+	for i, dir := range dirs {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			infos[i], errs[i] = a.resolveCompose(root, dir, d.Network.LANIface)
+		})
+	}
+	wg.Wait()
+
+	d.Network.ServerIP = serverFrom(hosts, infos)
+	a.discoverDNS(c, hosts, &d)
+	if npm, err := a.resolveCompose(root, c.NPM.Dir, ""); err == nil {
+		for _, h := range hosts {
+			if h.Port == 81 || npm.Names[h.Server] { // the NPM's own admin
+				d.Network.NPMCheckHost = h.Domains[0]
+				break
+			}
+		}
+	}
+
+	d.Services = []discoveredService{}
+	for i, dir := range dirs {
+		s := discoveredService{Dir: dir, Name: slugName(dir)}
+		if j := slices.IndexFunc(c.Services, func(sv Service) bool { return sv.Dir == dir }); j >= 0 {
+			s.Name, s.Configured = c.Services[j].Name, true
+		}
+		if errs[i] != nil {
+			s.Error = "o docker compose não leu o compose: " + errs[i].Error()
+			d.Services = append(d.Services, s)
+			continue
+		}
+		info := infos[i]
+		var served string
+		s.Host, s.Hosts, served = match(hosts, info, d.Network.ServerIP)
+		s.OverrideYAML, s.RequireFreeIP = info.overrideFor(served), info.FreeIP
+		s.Notes = info.Notes
+		if s.Host == "" && len(hosts) > 0 {
+			s.Notes = append(s.Notes, "nenhum proxy host do NPM aponta para este compose")
+		}
+		d.Services = append(d.Services, s)
+	}
+	return d
+}
+
+// serverFrom is the server's address: the IP the proxy hosts point to most,
+// leaving out the fixed IPs of macvlans (those are the containers').
+func serverFrom(hosts []proxyHost, infos []composeInfo) string {
+	count := map[string]int{}
+	for _, h := range hosts {
+		fixed := slices.ContainsFunc(infos, func(i composeInfo) bool { return i.FixedIPs[h.Server] != "" })
+		if isIP(h.Server) && !fixed {
+			count[h.Server]++
+		}
+	}
+	best := ""
+	for ip, n := range count {
+		if n > count[best] || n == count[best] && ip < best {
+			best = ip
+		}
+	}
+	return best
+}
+
+// discoverDNS asks the Technitium, with the token there is, for its zones:
+// the one that holds the proxy hosts' domains, and its wildcard (the
+// server's address, as the clients see it).
+func (a *Agent) discoverDNS(c Config, hosts []proxyHost, d *discovery) {
+	b, _ := os.ReadFile(c.DNS.TokenFile)
+	tok := strings.TrimSpace(string(b))
+	if tok == "" {
+		return
+	}
+	var zl struct {
+		Response struct {
+			Zones []struct {
+				Name     string `json:"name"`
+				Type     string `json:"type"`
+				Internal bool   `json:"internal"`
+			} `json:"zones"`
+		} `json:"response"`
+	}
+	if technitiumJSON(a.sys, c.DNS.APIURL, "zones/list", nil, tok, &zl) != nil {
+		return
+	}
+	best, most := "", -1
+	for _, z := range zl.Response.Zones {
+		if z.Internal || z.Type != "Primary" {
+			continue
+		}
+		d.DNS.Zones = append(d.DNS.Zones, z.Name)
+		n := 0
+		for _, h := range hosts {
+			n += len(slices.DeleteFunc(slices.Clone(h.Domains), func(x string) bool { return !strings.HasSuffix(x, "."+z.Name) }))
+		}
+		if n > most {
+			best, most = z.Name, n
+		}
+	}
+	d.DNS.Zone = best
+	if best == "" {
+		return
+	}
+	var rec struct {
+		Response struct {
+			Records []struct {
+				Type  string `json:"type"`
+				RData struct {
+					IPAddress string `json:"ipAddress"`
+				} `json:"rData"`
+			} `json:"records"`
+		} `json:"response"`
+	}
+	if technitiumJSON(a.sys, c.DNS.APIURL, "zones/records/get", url.Values{"domain": {"*." + best}, "zone": {best}}, tok, &rec) == nil {
+		for _, r := range rec.Response.Records {
+			if r.Type == "A" && isIP(r.RData.IPAddress) {
+				d.Network.ServerIP = r.RData.IPAddress // what the clients are sent to wins
+				break
+			}
+		}
+	}
+}
+
+// technitiumJSON calls /api/<path> of the Technitium and reads its answer into
+// out; a status other than ok is the error, with its message.
+func technitiumJSON(sys System, apiURL, path string, q url.Values, token string, out any) error {
+	body, err := sys.Get(strings.TrimRight(apiURL, "/")+"/api/"+path+"?"+q.Encode(), token)
+	if err != nil {
+		return err
+	}
+	var st struct {
+		Status       string `json:"status"`
+		ErrorMessage string `json:"errorMessage"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		return fmt.Errorf("resposta inválida do Technitium: %w", err)
+	}
+	if st.Status != "ok" {
+		return fmt.Errorf("technitium %s: %s", st.Status, st.ErrorMessage)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(body, out)
+}
+
+func (a *Agent) getDiscover(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.discover())
+}
+
+// postTechnitiumLogin makes the agent's API token with the Technitium's
+// login and keeps it; the password is only passed on, never kept.
+func (a *Agent) postTechnitiumLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		User string `json:"user"`
+		Pass string `json:"pass"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	a.mu.Lock()
+	d := a.cfg.DNS
+	a.mu.Unlock()
+	var out struct {
+		Token    string `json:"token"`
+		Response struct {
+			Token string `json:"token"`
+		} `json:"response"`
+	}
+	err := technitiumJSON(a.sys, d.APIURL, "user/createToken", url.Values{"user": {req.User}, "pass": {req.Pass}, "tokenName": {"failover-agent"}}, "", &out)
+	tok := cmp.Or(out.Token, out.Response.Token)
+	if err == nil && tok == "" {
+		err = errors.New("o Technitium não deu um token")
+	}
+	if err != nil {
+		http.Error(w, "o Technitium recusou: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := writeAtomic(d.TokenFile, []byte(tok+"\n")); err != nil {
+		http.Error(w, "o token foi criado no Technitium mas não consegui guardá-lo: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.now = time.Now()
+	a.done(w, "", "token do Technitium criado com o utilizador "+req.User)
 }
