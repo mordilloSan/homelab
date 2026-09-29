@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -69,20 +70,40 @@ func TestSectionNumbersAndListen(t *testing.T) {
 	}
 }
 
+// Caminhos: a snapshots folder the agent can make is fine, a test snapshot
+// is made and deleted, and a failed one says why.
 func TestSectionCheck(t *testing.T) {
-	a, _ := setup(t)
-	a.cfg.Paths.SnapshotsDir = filepath.Join(t.TempDir(), "nao-existe")
-	code, body := postTo(t, a.postCheck, `{"section":"caminhos"}`)
-	var res []checkResult
-	if err := json.Unmarshal([]byte(body), &res); code != 200 || err != nil {
-		t.Fatalf("HTTP %d %s", code, body)
-	}
-	for _, r := range res {
-		if r.Field == "paths.snapshots_dir" && !r.OK {
-			return
+	a, f := setup(t)
+	check := func() map[string]checkResult {
+		code, body := postTo(t, a.postCheck, `{"section":"caminhos"}`)
+		var res []checkResult
+		if err := json.Unmarshal([]byte(body), &res); code != 200 || err != nil {
+			t.Fatalf("HTTP %d %s", code, body)
 		}
+		out := map[string]checkResult{}
+		for _, r := range res {
+			if r.Field == "paths.snapshots_dir" && strings.Contains(r.Msg, "snapshot") {
+				out["snap"] = r
+			} else {
+				out[r.Field] = r
+			}
+		}
+		return out
 	}
-	t.Fatalf("a pasta que falta não aparece: %s", body)
+	a.cfg.Paths.SnapshotsDir = filepath.Join(t.TempDir(), "ainda-nao")
+	if r := check(); !r["paths.snapshots_dir"].OK || !r["snap"].OK {
+		t.Fatalf("uma pasta que o agente cria deu erro: %+v", r)
+	}
+	if !slices.ContainsFunc(f.cmds, func(c string) bool {
+		return strings.HasPrefix(c, "btrfs subvolume delete "+a.cfg.Paths.SnapshotsDir+"/failover-teste-")
+	}) {
+		t.Fatalf("o snapshot de teste não foi apagado: %v", f.cmds)
+	}
+	a.cfg.Paths.SnapshotsDir = filepath.Join(t.TempDir(), "nao", "existe")
+	f.failCmd = []string{"btrfs subvolume snapshot"}
+	if r := check(); r["paths.snapshots_dir"].OK || r["snap"].OK || !strings.Contains(r["snap"].Msg, "subvolume") {
+		t.Fatalf("sem pasta-mãe e sem snapshot: %+v", r)
+	}
 }
 
 func TestRestart(t *testing.T) {

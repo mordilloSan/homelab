@@ -105,7 +105,8 @@ input[type=number] { width: 72px; padding: 5px 8px; border-radius: var(--radius)
 input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transparent 60%); }
 
 /* header: brand, tabs, then status and actions */
-.top { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
+.top { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; position: sticky; top: 0; z-index: 10;
+  margin: -20px -16px 0; padding: 12px 16px; background: var(--bg); box-shadow: 0 1px 0 var(--divider); } /* always in view */
 .brand { display: flex; align-items: center; gap: 12px; }
 .logo { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 26%; color: #fff;
   background: linear-gradient(160deg, #6395e0, var(--primary-dark));
@@ -122,12 +123,12 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
 .page { display: grid; gap: 20px; }
 /* settings: an index on the left, the sections on the right */
 .settings { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 20px; align-items: start; }
-.toc { position: sticky; top: 16px; display: grid; gap: 2px; }
+.toc { position: sticky; top: 84px; display: grid; gap: 2px; }
 .toc a { padding: 7px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; }
 .toc a:hover { color: var(--text); background: color-mix(in srgb, var(--text), transparent 92%); }
 .toc a[aria-current] { color: var(--text); background: color-mix(in srgb, var(--text), transparent 88%); }
 #settingsBody { display: grid; gap: 16px; }
-.set-sec { scroll-margin-top: 16px; }
+.set-sec { scroll-margin-top: 84px; }
 .set-sec h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .set-form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; min-width: 0; }
 .set-field { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 16px; row-gap: 4px; align-items: center; }
@@ -156,7 +157,7 @@ fieldset:disabled .set-input input { opacity: .6; cursor: not-allowed; }
 .disc-row { align-items: flex-start !important; }
 .disc-row input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; flex: none; }
 .disc-row.is-done { opacity: .7; }
-.disc-notes { display: block; color: var(--warning); font-size: 11.5px; margin-top: 2px; }
+.disc-notes { display: block; color: var(--warning); font-size: 11.5px; margin-top: 2px; white-space: normal; } /* .list .grow cuts to one line */
 .tl-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
 .tl-row .pw-field input { width: 100%; min-width: 0; }
 .tl-row .pw-field { margin-top: 8px; }
@@ -182,6 +183,7 @@ fieldset:disabled .set-input input { opacity: .6; cursor: not-allowed; }
 .icon-url .svc-icon { width: 34px; height: 34px; border-radius: 8px; flex: none; }
 .icon-url input { flex: 1; }
 .set-help a { color: var(--primary); }
+select option { background-color: var(--paper); color: var(--text); } /* the list takes the select's see-through well otherwise */
 select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well);
   font-variant-numeric: tabular-nums; }
 .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; margin-left: 4px; font-variant-numeric: tabular-nums; }
@@ -297,7 +299,7 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .section-head #svcSearch[hidden] + .btn { margin-left: auto; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .svc { --accent: var(--success); display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; cursor: pointer;
-  border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 16px; transition: border-color .5s, background-color .15s; }
+  border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 84px; transition: border-color .5s, background-color .15s; }
 .svc.alert { border-bottom-color: var(--accent); }
 .svc:hover { background-color: color-mix(in srgb, var(--text), transparent 96%); }
 .svc-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -413,6 +415,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 .note-text { color: var(--muted) !important; font-size: 12.5px; margin-top: 8px; }
 
 @media (max-width: 860px) {
+  .set-sec, .svc { scroll-margin-top: 124px; } /* the sticky header takes two lines here */
   .ev, .sheet .ev { grid-template-columns: 14px auto minmax(0, 1fr); row-gap: 2px; }
   .ev p { grid-column: 2 / -1; }
   .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; justify-content: space-around;
@@ -509,6 +512,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
       <div class="card-head" style="margin:0 4px -8px"><h2>Configurar em 1 minuto</h2></div>
       <p class="note-text" style="margin:0 4px">O agente já procurou o que pôde no TNAS e no espelho. Confirma, completa o que falta e carrega em Começar: grava tudo e diz como correu cada bloco.</p>
       <section class="card set-sec" id="su-rede"></section>
+      <section class="card set-sec" id="su-paths"></section>
       <section class="card set-sec" id="su-tech"></section>
       <section class="card set-sec" id="su-mail"></section>
       <section class="card set-sec" id="su-svcs"></section>
@@ -1458,7 +1462,7 @@ function discListHtml(d, pickable) {
     return `<li class="disc-row ${x.configured ? 'is-done' : ''}">
       ${pickable ? `<input type="checkbox" data-pick="${esc(x.dir)}" ${can ? 'checked' : ''} ${x.configured || x.error ? 'disabled' : ''} aria-label="Proteger ${esc(x.name)}">` : ''}
       <span class="grow"><strong>${esc(x.name)}</strong> <span class="mono muted">${esc(x.host || 'sem endereço')}</span>
-        ${notes.length ? `<small class="disc-notes">${notes.map(n => esc(sentence(n))).join(' ')}</small>` : ''}</span>
+        ${notes.map(n => `<small class="disc-notes">${esc(sentence(n))}</small>`).join('')}</span>
       ${x.configured ? chip('Já protegido', 'var(--success)', 'xs') : pickable ? '' : `<button class="btn" data-panel="svcEdit" data-prefill="${esc(x.dir)}">Adicionar</button>`}</li>`;
   }).join('');
   return `<ul class="list disc-list">${rows || '<li class="empty">Não encontrei nenhuma pasta com docker-compose.yml no espelho.</li>'}</ul>`;
@@ -1518,7 +1522,8 @@ async function detectInto(form) {
 // blocks that failed keep what was typed.
 const MAIL = {gmail: {host: 'smtp.gmail.com', port: 587, security: 'starttls'}, outlook: {host: 'smtp-mail.outlook.com', port: 587, security: 'starttls'}};
 const setupRes = {}; // block → its result after Começar
-const SU = ['rede', 'tech', 'mail', 'svcs'];
+const SU = ['rede', 'paths', 'tech', 'mail', 'svcs'];
+const PATH_KEYS = () => SECTIONS.find(x => x.id === 'caminhos').fields;
 const suForm = id => document.querySelector(`.su-form[data-su="${id}"]`);
 function mailPreset() {
   const h = st.settings['email.host'];
@@ -1532,13 +1537,20 @@ function suBlock(id, n, title, intro, body) {
 function setupHtml(id) {
   switch (id) {
     case 'rede': {
-      const found = k => disc?.network[NET_KEYS.find(x => x[1] === k)?.[0]] || st.settings[k];
-      const fields = SECTIONS[0].fields.map(fd => fieldHtml(fd, found(fd.k))).join('') + fieldHtml({k: 'dns.zone', l: 'Zona DNS', h: 'Vazia: a que o Technitium tiver para os domínios do NPM.'}, disc?.dns.zone || st.settings['dns.zone']);
+      // a new install proposes what was found; once set up, what is saved
+      const found = k => st.setup_pending && disc?.network[NET_KEYS.find(x => x[1] === k)?.[0]] || st.settings[k];
+      const fields = SECTIONS[0].fields.map(fd => fieldHtml(fd, found(fd.k))).join('') + fieldHtml({k: 'dns.zone', l: 'Zona DNS', h: 'Vazia: a que o Technitium tiver para os domínios do NPM.'}, st.setup_pending && disc?.dns.zone || st.settings['dns.zone']);
       return suBlock(id, 1, 'Rede e servidor', 'O router e a rede vêm do TNAS; o servidor, dos proxy hosts do NPM no espelho. Confirma ou corrige.',
         `${!disc ? discWaiting('A procurar…') : ''}<form class="su-form" data-su="rede" novalidate>${fields}</form>`);
     }
+    case 'paths': {
+      const where = !disc ? '' : disc.mirror.found ? `<p class="ok-text wiz-done" style="margin:0 0 8px">${icon('check')}<span>Encontrei o espelho em ${mono(disc.mirror.root)}, com ${plural(disc.services.length, 'pasta', 'pastas')} com docker-compose.yml.</span></p>`
+        : `<p class="bad-text wiz-done" style="margin:0 0 8px">${icon('alert')}<span>Não encontrei o espelho em ${mono(disc.mirror.root)}: corrige o subvolume e a pasta.</span></p>`;
+      return suBlock(id, 2, 'Caminhos', 'Onde o backup do TOS deixa o espelho do servidor, e onde ficam os snapshots de um failover (no mesmo volume btrfs do espelho). Os de fábrica servem um TNAS com o backup em /Volume1/ServerBackup.',
+        `${where}<form class="su-form" data-su="paths" novalidate>${PATH_KEYS().map(fd => fieldHtml(fd)).join('')}</form>`);
+    }
     case 'tech':
-      return suBlock(id, 2, 'Technitium', 'Num failover o agente aponta o nome do serviço para o TNAS. Entra com o utilizador do Technitium: o agente cria o seu próprio token e a password não fica guardada.',
+      return suBlock(id, 3, 'Technitium', 'Num failover o agente aponta o nome do serviço para o TNAS. Entra com o utilizador do Technitium: o agente cria o seu próprio token e a password não fica guardada.',
         `${st.dns_token ? `<p class="ok-text wiz-done" style="margin:0 0 8px">${icon('check')}O agente já tem um token. Para outro, entra outra vez.</p>` : ''}
         <form class="su-form" data-su="tech" autocomplete="on"><div class="tl-row"><label class="pw-field">Utilizador do Technitium <input name="tuser" autocomplete="username" value="admin"></label>
           <label class="pw-field">Password <input type="password" name="tpass" autocomplete="current-password"></label></div></form>
@@ -1546,7 +1558,7 @@ function setupHtml(id) {
     case 'mail': {
       const pre = mailPreset(), opt = (v, l) => `<option value="${v}" ${v === pre ? 'selected' : ''}>${l}</option>`;
       const f = (k, over = {}) => fieldHtml({...byKey(k), ...over});
-      return suBlock(id, 3, 'Avisos por email', 'Um email quando um serviço passa para o TNAS, volta, dá erro, ou o próprio agente falha.',
+      return suBlock(id, 4, 'Avisos por email', 'Um email quando um serviço passa para o TNAS, volta, dá erro, ou o próprio agente falha.',
         `<form class="su-form" data-su="mail" novalidate>
           <label class="set-field"><span class="set-label">Email</span><span class="set-input"><select name="preset">
             ${opt('gmail', 'Gmail')}${opt('outlook', 'Outlook')}${opt('outro', 'Outro servidor')}${opt('none', 'Sem avisos')}</select></span></label>
@@ -1560,9 +1572,9 @@ function setupHtml(id) {
     }
     case 'svcs': {
       const intro = 'As pastas do espelho com docker-compose.yml, com o endereço que o NPM lhes dá. Escolhe as que passam para o TNAS quando o servidor falha.';
-      if (!disc) return suBlock(id, 4, 'Serviços', intro, discWaiting('A procurar no espelho…'));
-      if (!disc.mirror.found) return suBlock(id, 4, 'Serviços', `Não encontrei o espelho em ${mono(disc.mirror.root)}. Indica onde está:`, sectionHtml(SECTIONS.find(x => x.id === 'caminhos')).replace(/^<h2>[^<]*<\/h2>/, ''));
-      return suBlock(id, 4, 'Serviços', intro, `${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
+      if (!disc) return suBlock(id, 5, 'Serviços', intro, discWaiting('A procurar no espelho…'));
+      if (!disc.mirror.found) return suBlock(id, 5, 'Serviços', intro, '<p class="note-text">Sem o espelho não há serviços: corrige os Caminhos e carrega em Começar.</p>');
+      return suBlock(id, 5, 'Serviços', intro, `${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
         ${discListHtml(disc, true)}<div class="sec-btns"><button class="btn" data-panel="svcEdit">+ Adicionar à mão</button></div>`);
     }
   }
@@ -1619,6 +1631,20 @@ async function startSetup() {
       res('tech', st.dns_token, st.dns_token ? 'O agente já tinha um token' : 'Falta a password: sem token o DNS não muda num failover');
     }
 
+    // the paths before the network: the server is found in the mirror
+    const paths = {};
+    for (const fd of PATH_KEYS()) if (val('paths', fd.k) !== String(st.settings[fd.k] ?? '')) paths[fd.k] = val('paths', fd.k);
+    const moved = Object.keys(paths).length > 0;
+    try {
+      if (moved) {
+        await send('paths', 'api/config/section', {section: 'caminhos', values: paths});
+        forgetDiscovery();
+      }
+      const r = toLogin(await fetch('api/config/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: 'caminhos'})}));
+      const bad = r.ok ? (await r.json()).filter(c => !c.ok).map(c => c.msg) : [];
+      res('paths', !bad.length, bad.length ? bad.join('; ') : moved ? 'Caminhos gravados e confirmados' : 'Caminhos confirmados');
+    } catch (x) { res('paths', false, x.message); }
+
     const rede = {};
     for (const [, k] of NET_KEYS) rede[k] = val('rede', k);
     const zone = val('rede', 'dns.zone') || (await getDiscovery(true).catch(() => null))?.dns.zone || '';
@@ -1643,12 +1669,15 @@ async function startSetup() {
       try {
         await send('mail', 'api/config/section', {section: 'avisos', values});
         pw.value = '';
+        suForm('mail').removeAttribute('data-dirty'); // saved, even if the test fails: the repaint shows it
         await send('mail', 'api/email/test', {});
         res('mail', true, `Email de teste enviado para ${values['email.to'] || values['email.user']}: vê se chegou`);
       } catch (x) { res('mail', false, x.message); }
     }
 
-    if (picked.length) {
+    if (moved) {
+      res('svcs', false, 'Os caminhos mudaram: revê a lista de serviços e carrega outra vez em Começar');
+    } else if (picked.length) {
       const {n, failed} = await protectPicked(picked);
       res('svcs', !failed.length, failed.length ? `Não consegui: ${failed.join('; ')}` : plural(n, 'serviço protegido', 'serviços protegidos'));
     } else {

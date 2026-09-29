@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -241,10 +242,33 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 		dir("paths.mirror_subvol", c.Paths.MirrorSubvol)
 		dir("paths.mirror_root", root)
 		dir("npm.dir", filepath.Join(root, c.NPM.Dir))
-		dir("paths.snapshots_dir", c.Paths.SnapshotsDir)
-		if c.Paths.OverridesDir != "" {
-			dir("paths.overrides_dir", c.Paths.OverridesDir)
+		// the agent makes these two on first use: a missing one is fine under an existing parent
+		made := func(field, p string) {
+			if _, err := os.Stat(p); err == nil {
+				add(field, nil, p+" existe")
+				return
+			}
+			_, err := os.Stat(filepath.Dir(p))
+			if err != nil {
+				err = errors.New(filepath.Dir(p) + " não existe: " + p + " não se pode criar")
+			}
+			add(field, err, p+" ainda não existe; o agente cria-a no primeiro uso")
 		}
+		made("paths.snapshots_dir", c.Paths.SnapshotsDir)
+		if c.Paths.OverridesDir != "" {
+			made("paths.overrides_dir", c.Paths.OverridesDir)
+		}
+		// a failover's first step, tried now: the mirror is a subvolume and the
+		// snapshots are on its volume (btrfs snapshots never cross volumes)
+		test := filepath.Join(c.Paths.SnapshotsDir, "failover-teste-"+time.Now().Format("20060102-150405"))
+		_ = os.Mkdir(c.Paths.SnapshotsDir, 0o755) // one level: under a parent that exists
+		err := a.sys.Run("btrfs", "subvolume", "snapshot", c.Paths.MirrorSubvol, test)
+		if err == nil {
+			err = a.sys.Run("btrfs", "subvolume", "delete", test)
+		} else {
+			err = fmt.Errorf("snapshot de teste do espelho falhou (tem de ser um subvolume btrfs, no mesmo volume da pasta dos snapshots): %w", err)
+		}
+		add("paths.snapshots_dir", err, "snapshot de teste do espelho feito e apagado")
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -39,7 +39,11 @@ func (e EmailConfig) recipient() string { return cmp.Or(e.To, e.User) }
 func (e EmailConfig) on() bool { return e.Host != "" && e.recipient() != "" }
 
 func (e EmailConfig) mail(subject, body string) Mail {
-	return Mail{Host: e.Host, Port: e.Port, Security: e.Security, User: e.User, Password: e.Password,
+	pw := e.Password
+	if e.Host == "smtp.gmail.com" { // an app password is shown as "abcd efgh ijkl mnop"
+		pw = strings.Join(strings.Fields(pw), "")
+	}
+	return Mail{Host: e.Host, Port: e.Port, Security: e.Security, User: e.User, Password: pw,
 		From: cmp.Or(e.From, e.User, e.recipient()), To: e.recipient(), Subject: subject, Body: body}
 }
 

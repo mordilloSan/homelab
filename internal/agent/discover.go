@@ -168,8 +168,8 @@ func parseProxyHost(b []byte) proxyHost {
 
 // composeInfo is what matters of a resolved compose for a failover.
 type composeInfo struct {
-	Names    map[string]bool   // service keys and container names, as a proxy host may name them
-	strong   map[string]bool   // the container names alone: a bare key (app, web) may be in any compose
+	Names    map[string]bool   // service keys, container names and hostnames, as a proxy host may name them
+	strong   map[string]bool   // the container names and hostnames alone: a bare key (app, web) may be in any compose
 	keyOf    map[string]string // any of Names → its service key
 	Ports    map[int]string    // published port → service key
 	FixedIPs map[string]string // fixed IP on a macvlan → service key
@@ -215,6 +215,7 @@ func analyzeCompose(js []byte, lanIface string) (composeInfo, error) {
 // composeService is what analyzeCompose reads of one service.
 type composeService struct {
 	ContainerName string `json:"container_name"`
+	Hostname      string `json:"hostname"` // an NPM may point to it: it is as specific as the container name
 	Ports         []struct {
 		Published any `json:"published"`
 	} `json:"ports"`
@@ -245,7 +246,7 @@ func (s composeService) hardware() bool {
 
 func (info *composeInfo) addService(project, k string, s composeService) {
 	info.Names[k], info.keyOf[k] = true, k
-	strong := []string{s.ContainerName}
+	strong := []string{s.ContainerName, s.Hostname}
 	if project != "" { // compose's own container names
 		strong = append(strong, project+"-"+k+"-1", project+"_"+k+"_1")
 	}
@@ -513,6 +514,11 @@ func (a *Agent) discover() discovery {
 			continue
 		}
 		info, as := infos[i], assigned[i]
+		if len(info.keyOf) == 0 { // a failover would start nothing
+			s.Error = "o docker compose config não deu nenhum serviço: estão todos com profiles, o ficheiro só tem include, ou falta o .env no espelho?"
+			d.Services = append(d.Services, s)
+			continue
+		}
 		s.Host, s.Hosts = as.host, as.all
 		s.OverrideYAML, s.RequireFreeIP = info.overrideFor(as.keys), info.FreeIP
 		s.Notes = slices.Concat(info.Notes, as.notes)
