@@ -223,7 +223,7 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
   box-shadow: 0 0 12px 3px color-mix(in srgb, var(--pc), transparent 40%); pointer-events: none; }
 .lane-label { grid-area: label; align-self: end; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 /* under the link: the mode, then the services on their way */
-.lane-under { grid-area: pills; align-self: start; display: grid; justify-items: center; gap: 8px; }
+.lane-under { grid-area: pills; align-self: start; display: grid; justify-items: center; gap: 8px; margin-top: 6px; }
 /* opaque: the link runs behind it when the boxes stack */
 .mode-chip { text-decoration: none; background: linear-gradient(color-mix(in srgb, var(--c), transparent 87%), color-mix(in srgb, var(--c), transparent 87%)), var(--paper); }
 /* heartbeat bars: one per check, newest on the right */
@@ -320,21 +320,17 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .section-head #svcSearch[hidden] + .icon-btn { margin-left: auto; }
 .add-btn { color: var(--primary); }
 .add-btn .icon { width: 22px; height: 22px; }
-/* under the topology: the services, and the events beside them with their own scroll */
-.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 34%); gap: 20px; align-items: start; }
+/* under the topology: the services, then the events with their own scroll */
+.lower { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .svc-col { display: grid; gap: 16px; min-width: 0; }
 .ev-card { display: flex; flex-direction: column; min-height: 0; padding-bottom: 12px; }
 .ev-card .timeline { overflow-y: auto; min-height: 0; flex: 1; margin: 0 -8px; padding: 0 8px; }
-.ev-card .ev { grid-template-columns: 14px auto minmax(0, 1fr); row-gap: 2px; }
-.ev-card .ev p { grid-column: 2 / -1; }
 /* wide screens: the page fits the window, and only the lists scroll */
 @media (min-width: 861px) and (min-height: 640px) {
   main:has(#page-overview:not([hidden])) { height: 100dvh; grid-template-rows: auto minmax(0, 1fr); padding-bottom: 20px; }
   #page-overview { display: flex; flex-direction: column; min-height: 0; }
-  .lower { flex: 1; min-height: 0; align-items: stretch; }
-  .svc-col { grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
-  .svc-col .grid { overflow-y: auto; min-height: 0; align-content: start; margin: -6px; padding: 6px; }
-  .ev-card { height: 100%; }
+  .lower { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .ev-card { flex: 1; min-height: 240px; } /* below that, the page scrolls */
 }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .svc { --accent: var(--success); display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; cursor: pointer;
@@ -384,7 +380,8 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .ev-filters .btn { margin-left: auto; }
 .ev-card .ev-filters { flex-wrap: nowrap; align-items: center; }
 .ev-card .ev-filters select { max-width: 45%; }
-.ev-card .ev-filters input { flex: 1; min-width: 0; max-width: none; }
+.ev-card .ev-filters input { flex: 1; min-width: 0; max-width: 320px; }
+.ev-card .ev-filters .icon-btn { margin-left: auto; }
 .ev-filters input { flex: 1; min-width: 180px; max-width: 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider); background: var(--well); }
 #evMore { display: flex; justify-content: center; padding-top: 12px; }
 #evMore:empty { display: none; }
