@@ -16,10 +16,10 @@ ovs_eth0	0001A8C0	00000000	0001	0	0	0	00FFFFFF	0	0	0
 `
 
 func TestDefaultRoute(t *testing.T) {
-	if got := defaultRoute([]byte(procRoute)); got != "192.168.1.1" {
-		t.Fatal(got)
+	if got, iface := defaultRoute([]byte(procRoute)); got != "192.168.1.1" || iface != "ovs_eth0" {
+		t.Fatal(got, iface)
 	}
-	if got := defaultRoute([]byte("Iface\tDestination\n")); got != "" {
+	if got, _ := defaultRoute([]byte("Iface\tDestination\n")); got != "" {
 		t.Fatalf("sem rota por defeito: %q", got)
 	}
 }
@@ -31,11 +31,16 @@ func TestLanOf(t *testing.T) {
 		{"docker0", []*net.IPNet{{IP: net.ParseIP("172.17.0.1"), Mask: dock.Mask}}},
 		{"ovs_eth0", []*net.IPNet{{IP: net.ParseIP("192.168.1.249"), Mask: lan.Mask}}},
 	}
-	ip, iface := lanOf(ifaces, net.ParseIP("192.168.1.1"))
-	if ip != "192.168.1.249" || iface != "ovs_eth0" {
+	ip, iface, n := lanOf(ifaces, net.ParseIP("192.168.1.1"), "")
+	if ip != "192.168.1.249" || iface != "ovs_eth0" || n == nil || !n.Contains(net.ParseIP("192.168.1.66")) {
+		t.Fatal(ip, iface, n)
+	}
+	// the route's own interface wins over another one on the same network (a macvlan shim)
+	ifaces = append([]ifaceAddr{{"shim", []*net.IPNet{{IP: net.ParseIP("192.168.1.250"), Mask: lan.Mask}}}}, ifaces...)
+	if ip, iface, _ := lanOf(ifaces, net.ParseIP("192.168.1.1"), "ovs_eth0"); ip != "192.168.1.249" || iface != "ovs_eth0" {
 		t.Fatal(ip, iface)
 	}
-	if ip, _ := lanOf(ifaces, nil); ip != "" {
+	if ip, _, _ := lanOf(ifaces, nil, ""); ip != "" {
 		t.Fatal("sem router não há LAN")
 	}
 }
@@ -97,7 +102,7 @@ const immichJSON = `{"name":"immich","services":{
 
 func TestAnalyzeCompose(t *testing.T) {
 	u, err := analyzeCompose([]byte(unifiJSON), "ovs_eth0")
-	if err != nil || u.FreeIP != "192.168.1.92" || !strings.Contains(u.Override, "parent: ovs_eth0") || !u.Names["unifi"] || u.Ports[8443] == "" {
+	if err != nil || u.FreeIP != "192.168.1.92" || !strings.Contains(u.overrideFor(nil), "parent: ovs_eth0") || !u.Names["unifi"] || u.Ports[8443] == "" {
 		t.Fatalf("unifi: %v %+v", err, u)
 	}
 	im, err := analyzeCompose([]byte(immichJSON), "ovs_eth0")
@@ -115,17 +120,68 @@ func TestMatchHost(t *testing.T) {
 		{Domains: []string{"immich.engmariz.com"}, Server: "immich_server", Port: 2283},
 		{Domains: []string{"unifi.engmariz.com"}, Server: "192.168.1.92", Port: 8443},
 	}
-	vw := composeInfo{Names: map[string]bool{"vaultwarden": true}, Ports: map[int]string{8080: "vaultwarden"}}
+	vw := composeInfo{Names: map[string]bool{"vaultwarden": true}, keyOf: map[string]string{"vaultwarden": "vaultwarden"}, Ports: map[int]string{8080: "vaultwarden"}}
 	im, _ := analyzeCompose([]byte(immichJSON), "")
 	u, _ := analyzeCompose([]byte(unifiJSON), "")
-	for want, info := range map[string]composeInfo{"bitwarden.engmariz.com": vw, "immich.engmariz.com": im, "unifi.engmariz.com": u} {
-		if got, _ := matchHost(hosts, info, "192.168.1.66"); got != want {
-			t.Errorf("queria %s, deu %q", want, got)
+	other := composeInfo{Names: map[string]bool{"x": true}, keyOf: map[string]string{"x": "x"}, Ports: map[int]string{9999: "x"}}
+	got := assignHosts(hosts, []composeInfo{vw, im, u, other}, "192.168.1.66")
+	for i, want := range []string{"bitwarden.engmariz.com", "immich.engmariz.com", "unifi.engmariz.com", ""} {
+		if got[i].host != want {
+			t.Errorf("%d: queria %q, deu %q", i, want, got[i].host)
 		}
 	}
-	other := composeInfo{Names: map[string]bool{"x": true}, Ports: map[int]string{9999: "x"}}
-	if got, _ := matchHost(hosts, other, "192.168.1.66"); got != "" {
-		t.Fatalf("inventou %q", got)
+}
+
+// The NPM with network_mode: host forwards to 127.0.0.1: the server itself.
+func TestMatchLoopback(t *testing.T) {
+	hosts := []proxyHost{{Domains: []string{"bitwarden.engmariz.com"}, Server: "127.0.0.1", Port: 8080}}
+	vw := composeInfo{Names: map[string]bool{"vaultwarden": true}, keyOf: map[string]string{"vaultwarden": "vaultwarden"}, Ports: map[int]string{8080: "vaultwarden"}}
+	if got := assignHosts(hosts, []composeInfo{vw}, "192.168.1.66"); got[0].host != "bitwarden.engmariz.com" {
+		t.Fatalf("%+v", got)
+	}
+	// a proxy host to another machine's IP with the same port is not this compose
+	hosts[0].Server = "192.168.1.70"
+	if got := assignHosts(hosts, []composeInfo{vw}, "192.168.1.66"); got[0].host != "" {
+		t.Fatalf("inventou %+v", got)
+	}
+}
+
+// A proxy host that names a service key two composes share (app, web) is
+// given to neither: a note says so. A container name is specific.
+func TestMatchAmbiguous(t *testing.T) {
+	a := composeInfo{Names: map[string]bool{"app": true, "wiki": true}, keyOf: map[string]string{"app": "app", "wiki": "app"}, strong: map[string]bool{"wiki": true}, Ports: map[int]string{}}
+	b := composeInfo{Names: map[string]bool{"app": true}, keyOf: map[string]string{"app": "app"}, Ports: map[int]string{}}
+	hosts := []proxyHost{{Domains: []string{"app.engmariz.com"}, Server: "app", Port: 80}, {Domains: []string{"wiki.engmariz.com"}, Server: "wiki", Port: 80}}
+	got := assignHosts(hosts, []composeInfo{a, b}, "")
+	if got[0].host != "wiki.engmariz.com" || got[1].host != "" || len(got[1].notes) == 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// The server is the IP most proxy hosts point to on the LAN, never the
+// loopback, docker0, the router or the TNAS itself.
+func TestServerVote(t *testing.T) {
+	var hosts []proxyHost
+	for ip, n := range map[string]int{"127.0.0.1": 3, "172.17.0.1": 3, "192.168.1.1": 2, "192.168.1.249": 2, "192.168.1.66": 1} {
+		for range n {
+			hosts = append(hosts, proxyHost{Domains: []string{"x.engmariz.com"}, Server: ip, Port: 80})
+		}
+	}
+	_, lan, _ := net.ParseCIDR("192.168.1.0/24")
+	if got := serverFrom(hosts, nil, lan, "192.168.1.1", "192.168.1.249"); got != "192.168.1.66" {
+		t.Fatalf("votou %q", got)
+	}
+	if got := serverFrom(hosts, nil, nil, "", ""); got != "" {
+		t.Fatalf("sem rede, votou %q", got)
+	}
+}
+
+// A wildcard, a regex or a catch-all server_name is never a service's address:
+// a failover would overwrite the zone's wildcard record.
+func TestProxyHostWildcards(t *testing.T) {
+	h := parseProxyHost([]byte("server {\n set $server 192.168.1.66;\n server_name *.engmariz.com _ ~^(?<s>.+)$ localhost real.engmariz.com;\n}\n"))
+	if !slices.Equal(h.Domains, []string{"real.engmariz.com"}) {
+		t.Fatalf("%v", h.Domains)
 	}
 }
 
@@ -133,7 +189,7 @@ func TestMatchHost(t *testing.T) {
 // macvlan to the TNAS's LAN interface.
 func TestSuggestedOverride(t *testing.T) {
 	im, _ := analyzeCompose([]byte(immichJSON), "ovs_eth0")
-	ov := im.overrideFor("immich-server")
+	ov := im.overrideFor([]string{"immich-server"})
 	if !strings.Contains(ov, "immich-machine-learning:") || !strings.Contains(ov, `profiles: ["disabled"]`) || strings.Contains(ov, "immich-server:") {
 		t.Fatalf("%s", ov)
 	}
@@ -188,12 +244,10 @@ func discoverSetup(t *testing.T) (*Agent, *fake) {
 	a.ifaces = func() []ifaceAddr {
 		return []ifaceAddr{{"ovs_eth0", []*net.IPNet{{IP: net.ParseIP("192.168.1.249"), Mask: lan.Mask}}}}
 	}
-	vwJSON := `{"name":"vaultwarden","services":{"vaultwarden":{"container_name":"vaultwarden","ports":[{"published":"8080","target":80}]}}}`
+	vwJSON := `{"name":"vw","services":{"vaultwarden":{"container_name":"vaultwarden","ports":[{"published":"8080","target":80}]}}}`
 	npmJSON := `{"name":"npm","services":{"app":{"container_name":"npm","ports":[{"published":"81"},{"published":"443"}]}}}`
-	f.outs = map[string]string{
-		"docker compose -p discover-vaultwarden": vwJSON, "docker compose -p discover-unifi": unifiJSON,
-		"docker compose -p discover-immich": immichJSON, "docker compose -p discover-npm": npmJSON,
-	}
+	at := func(d string) string { return "docker compose -f " + filepath.Join(root, d, "docker-compose.yml") }
+	f.outs = map[string]string{at("vaultwarden"): vwJSON, at("unifi"): unifiJSON, at("immich"): immichJSON, at("npm"): npmJSON}
 	api := strings.TrimRight(a.cfg.DNS.APIURL, "/")
 	f.bodies = map[string][]byte{
 		api + "/api/zones/list?": []byte(`{"status":"ok","response":{"zones":[{"name":"engmariz.com","type":"Primary","internal":false},{"name":"0.in-addr.arpa","type":"Primary","internal":true}]}}`),
@@ -258,7 +312,7 @@ func TestTechnitiumLogin(t *testing.T) {
 	if b, _ := os.ReadFile(a.cfg.DNS.TokenFile); strings.TrimSpace(string(b)) != "secret" {
 		t.Fatal("uma recusa mudou o token")
 	}
-	if code, body := postTo(t, a.postTechnitiumLogin, `{"user":"admin","pass":"certa"}`); code != 204 {
+	if code, body := postTo(t, a.postTechnitiumLogin, `{"user":"admin","pass":"certa"}`); code != 200 || !strings.Contains(body, `"warning":""`) {
 		t.Fatalf("HTTP %d %s", code, body)
 	}
 	if b, _ := os.ReadFile(a.cfg.DNS.TokenFile); strings.TrimSpace(string(b)) != "novo-token" {
@@ -268,5 +322,39 @@ func TestTechnitiumLogin(t *testing.T) {
 		if b, _ := os.ReadFile(p); strings.Contains(string(b), "certa") {
 			t.Fatalf("a password ficou em %s", p)
 		}
+	}
+}
+
+// The Technitium's wildcard is what clients get (maybe the NPM's own IP); the
+// match keeps the IP the proxy hosts point to. And compose names its project
+// from the file, not from a -p the agent would make up.
+func TestDiscoverDNSOnlyReports(t *testing.T) {
+	a, f := discoverSetup(t)
+	api := strings.TrimRight(a.cfg.DNS.APIURL, "/")
+	f.bodies[api+"/api/zones/records/get?domain=%2A.engmariz.com&zone=engmariz.com"] = []byte(`{"status":"ok","response":{"records":[{"type":"A","rData":{"ipAddress":"192.168.1.67"}}]}}`)
+	d := a.discover()
+	if d.Network.ServerIP != "192.168.1.67" {
+		t.Fatalf("o IP do wildcard não foi dito: %q", d.Network.ServerIP)
+	}
+	for _, s := range d.Services {
+		if s.Dir == "vaultwarden" && s.Host != "bitwarden.engmariz.com" {
+			t.Fatalf("a correspondência pela porta perdeu-se: %+v", s)
+		}
+	}
+	for _, c := range f.scans {
+		if strings.Contains(c, "config --format json") && strings.Contains(c, " -p ") {
+			t.Fatalf("o nome do projeto foi inventado: %s", c)
+		}
+	}
+}
+
+// A token that cannot touch the zone (a user without rights) is kept, with a warning.
+func TestTechnitiumLoginNoRights(t *testing.T) {
+	a, f := setup(t)
+	api := strings.TrimRight(a.cfg.DNS.APIURL, "/")
+	f.bodies = map[string][]byte{api + "/api/user/createToken?pass=p&tokenName=failover-agent&user=leitor": []byte(`{"status":"ok","token":"fraco"}`)}
+	f.badToken = "fraco"
+	if code, body := postTo(t, a.postTechnitiumLogin, `{"user":"leitor","pass":"p"}`); code != 200 || !strings.Contains(body, "não mexe na zona") {
+		t.Fatalf("HTTP %d %s", code, body)
 	}
 }

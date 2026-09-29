@@ -102,7 +102,7 @@ func fe(field, msg string) error { return &FieldError{field, msg} }
 func isIP(s string) bool { return net.ParseIP(s) != nil }
 
 // isName is a host or zone name: no scheme, port, path or spaces.
-func isName(s string) bool { return s != "" && !strings.ContainsAny(s, " /:\t") }
+func isName(s string) bool { return s != "" && !strings.ContainsAny(s, " /:\t*~") }
 
 func isURL(s string) bool {
 	u, err := url.Parse(s)
@@ -314,19 +314,19 @@ type Agent struct {
 	cfgPath    string
 	statePath  string
 	eventsPath string
-	evMu       sync.Mutex             // guards events, apart from mu so the page can read them mid-tick
-	events     []Event                // oldest first
-	trimmedOn  string                 // the day trimEvents last ran, as 2006-01-02
-	tnasIP     atomic.Pointer[string] // for the certificate, read on handshakes without mu
-	restart    func()                 // ends Run so Docker starts the agent again (SetRestart)
-	listening  string                 // the UI's address in use, which a saved ui.listen may differ from
-	certs      atomic.Pointer[certStore]
-	iconMu     sync.Mutex         // guards iconRev and the icon files; never held while taking mu
-	iconRev    map[string]string  // service → version of its stored icon, for the page's cache
-	iconJobs   sync.WaitGroup     // fetchIcons in the background (tests wait for it)
-	iconPass   sync.Mutex         // one fetchIcons pass at a time
-	procRoute  string             // the route table the discovery reads (tests set another)
-	ifaces     func() []ifaceAddr // set when the UI serves TLS
+	evMu       sync.Mutex                // guards events, apart from mu so the page can read them mid-tick
+	events     []Event                   // oldest first
+	trimmedOn  string                    // the day trimEvents last ran, as 2006-01-02
+	tnasIP     atomic.Pointer[string]    // for the certificate, read on handshakes without mu
+	restart    func()                    // ends Run so Docker starts the agent again (SetRestart)
+	listening  string                    // the UI's address in use, which a saved ui.listen may differ from
+	certs      atomic.Pointer[certStore] // set when the UI serves TLS
+	iconMu     sync.Mutex                // guards iconRev and the icon files; never held while taking mu
+	iconRev    map[string]string         // service → version of its stored icon, for the page's cache
+	iconJobs   sync.WaitGroup            // fetchIcons in the background (tests wait for it)
+	iconPass   sync.Mutex                // one fetchIcons pass at a time
+	procRoute  string                    // the route table the discovery reads (tests set another)
+	ifaces     func() []ifaceAddr        // the interfaces the discovery reads (tests set others)
 	wake       chan struct{}
 	view       atomic.Pointer[[]byte]
 	pulling    atomic.Bool

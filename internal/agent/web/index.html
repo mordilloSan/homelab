@@ -1039,7 +1039,11 @@ let panel = null;
 function openPanel(kind, name, prefill) {
   if (kind === 'svc') loadEvents();
   panel = {kind, name, prefill};
-  if (kind === 'discover') getDiscovery(true).then(() => { if (panel?.kind === 'discover') { painted.panelBody = null; renderPanel(); } }, () => {});
+  if (kind === 'discover') {
+    discErr = '';
+    const again = () => { if (panel?.kind === 'discover') { painted.panelBody = null; renderPanel(); } };
+    getDiscovery(true).then(again, again);
+  }
   if (kind === 'svcEdit') loadServiceForm(panel);
   painted.panelHead = painted.panelBody = painted.panelFoot = null;
   renderPanel();
@@ -1135,7 +1139,7 @@ const optMinutes = (v, min) => [...new Set([...MINUTES.filter(m => m >= min), v]
 function discoverPanel() {
   const head = `<span class="svc-icon">${icon('layers')}</span><div class="node-id"><h2 id="panelTitle">Serviços descobertos</h2>
     <span class="muted">As pastas do espelho, com o endereço que o NPM lhes dá</span></div>`;
-  if (!disc) return {head, body: '<p class="note-text" style="padding-top:20px">A procurar no espelho…</p>'};
+  if (!disc) return {head, body: `<div class="sec">${discWaiting('A procurar no espelho…')}</div>`};
   return {head, body: `<div class="sec">${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
     ${discListHtml(disc, false)}</div>`};
 }
@@ -1153,7 +1157,8 @@ function svcEditPanel() {
   if (v.dir && !dirs.includes(v.dir)) dirs.unshift(v.dir);
   const field = (k, l, input, h = '') => `<label class="set-field" data-k="${k}"><span class="set-label">${l}</span>
     <span class="set-input">${input}</span>${h ? `<small class="set-help">${h}</small>` : ''}<small class="field-err" role="alert"></small></label>`;
-  const body = `<form id="svcForm" novalidate autocomplete="off">
+  const auto = pre ? {name: pre.name, host: pre.host || '', override_yaml: pre.override_yaml || '', require_free_ip: pre.require_free_ip || ''} : {};
+  const body = `<form id="svcForm" novalidate autocomplete="off" data-auto="${esc(JSON.stringify(auto))}">
     ${panel.data.err ? `<p class="bad-text">Não consegui ler o espelho: ${esc(panel.data.err)}</p>` : ''}
     <div class="sec"><fieldset>
       ${field('name', 'Nome', `<input name="name" value="${esc(v.name)}" ${isNew ? 'required' : 'disabled'} spellcheck="false" pattern="[a-z0-9][a-z0-9_-]*">`,
@@ -1228,10 +1233,15 @@ async function removeService(name) {
 document.addEventListener('change', async e => {
   if (e.target.name !== 'dir' || !e.target.closest('#svcForm') || panel?.name) return;
   const f = e.target.form, x = (await getDiscovery()).services.find(y => y.dir === e.target.value);
-  if (!x) return;
-  const fill = (k, v) => { if (v && !f.elements[k].value.trim()) { f.elements[k].value = v; return true; } return false; };
+  const auto = JSON.parse(f.dataset.auto || '{}'); // what the discovery filled for the folder before
+  for (const [k, v] of Object.entries(auto)) if (f.elements[k].value === v) f.elements[k].value = '';
+  f.dataset.auto = '{}';
+  if (!x) { $('svcDisc').textContent = ''; return; }
+  const filled = {};
+  const fill = (k, v) => { if (v && !f.elements[k].value.trim()) { f.elements[k].value = v; filled[k] = v; return true; } return false; };
   const got = [fill('name', x.name) && 'nome', fill('host', x.host) && 'endereço', fill('override_yaml', x.override_yaml) && 'override',
     fill('require_free_ip', x.require_free_ip) && 'IP'].filter(Boolean);
+  f.dataset.auto = JSON.stringify(filled);
   $('svcDisc').textContent = got.length ? `Da descoberta: ${got.join(', ')}. ${(x.notes || []).map(sentence).join(' ')}` : '';
 });
 document.addEventListener('submit', e => {
@@ -1388,15 +1398,20 @@ function renderSettings() {
 // What the agent discovered (GET /api/discover): proposals only. It runs
 // docker compose on every folder of the mirror, so it is asked on demand and
 // kept a minute; saving something clears it.
-let disc = null, discAt = 0, discing = null;
+let disc = null, discAt = 0, discing = null, discGen = 0, discErr = '';
 function getDiscovery(force = false) {
   if (!force && disc && Date.now() - discAt < 60e3) return Promise.resolve(disc);
-  discing ??= fetch('api/discover', {cache: 'no-store'}).then(r => toLogin(r).json())
-    .then(d => { disc = d; discAt = Date.now(); return d; })
+  const gen = discGen;
+  discing ??= fetch('api/discover', {cache: 'no-store'}).then(async r => { if (!toLogin(r).ok) throw new Error((await readErr(r)).error); return r.json(); })
+    .then(d => { if (gen === discGen) { disc = d; discAt = Date.now(); discErr = ''; } return d; }, err => { discErr = err.message; throw err; })
     .finally(() => { discing = null; });
   return discing;
 }
-const forgetDiscovery = () => { disc = null; };
+// something was saved: what was discovered is stale, and a fetch already on
+// its way must not bring it back
+const forgetDiscovery = () => { disc = null; discGen++; };
+const discWaiting = what => discErr ? `<p class="bad-text">Não consegui descobrir: ${esc(sentence(discErr))}</p><div class="sec-btns"><button class="btn" data-rediscover>Tentar outra vez</button></div>`
+  : `<p class="note-text">${what}</p>`;
 // the discovered service of a folder, if any
 const discOf = dir => disc?.services.find(x => x.dir === dir);
 
@@ -1418,9 +1433,11 @@ document.addEventListener('submit', async e => {
     const r = toLogin(await fetch('api/technitium/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({user: f.elements.user.value, pass: f.elements.pass.value})}));
     if (!r.ok) throw new Error((await readErr(r)).error);
+    const {warning} = await r.json().catch(() => ({}));
     f.elements.pass.value = '';
     document.activeElement?.blur();
     toast('Ligado ao Technitium: o agente tem o seu token');
+    if (warning) toast(cap(warning), false);
     forgetDiscovery();
     await refresh();
     painted['wiz-body'] = null;
@@ -1446,7 +1463,8 @@ function netHtml(d) {
     ${!allHome() ? '<p class="note-text">A rede só muda com todos os serviços no servidor.</p>' : ''}`;
 }
 async function useNetwork() {
-  const d = await getDiscovery(true), rede = {};
+  const d = disc || await getDiscovery(), rede = {}; // what the table shows
+
   for (const [dk, sk] of NET_KEYS) if (d.network[dk]) rede[sk] = d.network[dk];
   const send = (section, values) => fetch(`api/config/section`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section, values})});
   try {
@@ -1458,6 +1476,7 @@ async function useNetwork() {
     }
     toast('Rede gravada com os valores descobertos');
     forgetDiscovery();
+    runChecks('rede'); // a wrong value shows in Definições → Rede
     await refresh();
     painted['wiz-body'] = null;
     renderWizard();
@@ -1497,6 +1516,14 @@ async function protectPicked(root) {
   renderWizard();
 }
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-rediscover]')) {
+    discErr = '';
+    forgetDiscovery();
+    painted['wiz-body'] = painted.panelBody = null;
+    renderWizard();
+    if (panel?.kind === 'discover') openPanel('discover');
+    return;
+  }
   if (e.target.closest('[data-use-net]')) { useNetwork(); return; }
   const prot = e.target.closest('[data-protect]');
   if (prot) { prot.disabled = true; protectPicked(prot.closest('.set-sec, .sheet-body') || document); return; }
@@ -1538,10 +1565,10 @@ function wizStepHtml(id) {
       return `<h2>Technitium</h2>${intro}${st.dns_token ? `<p class="ok-text wiz-done">${icon('check')}O agente já tem um token do Technitium.</p><p class="note-text">Para outro, entra outra vez:</p>` : ''}
         ${techLoginHtml()}<p class="note-text">Em ${mono(st.settings['dns.api_url'])}. Outro endereço ou um token feito à mão: <a href="#/definicoes/dns">Definições → DNS</a>.</p>`;
     case 'rede':
-      if (!disc) { getDiscovery().then(() => { painted['wiz-body'] = null; renderWizard(); }, () => {}); return `<h2>Rede</h2>${intro}<p class="note-text">A procurar…</p>`; }
+      if (!disc) { if (!discErr) getDiscovery().then(() => { painted['wiz-body'] = null; renderWizard(); }, () => { painted['wiz-body'] = null; renderWizard(); }); return `<h2>Rede</h2>${intro}${discWaiting('A procurar…')}`; }
       return `<h2>Rede</h2>${intro}${netHtml(disc)}`;
     case 'servicos':
-      if (!disc) { getDiscovery().then(() => { painted['wiz-body'] = null; renderWizard(); }, () => {}); return `<h2>Serviços</h2>${intro}<p class="note-text">A procurar no espelho…</p>`; }
+      if (!disc) { if (!discErr) getDiscovery().then(() => { painted['wiz-body'] = null; renderWizard(); }, () => { painted['wiz-body'] = null; renderWizard(); }); return `<h2>Serviços</h2>${intro}${discWaiting('A procurar no espelho…')}`; }
       if (!disc.mirror.found) return `<h2>Serviços</h2><p class="bad-text">Não encontrei o espelho em ${mono(disc.mirror.root)}. Indica onde está:</p>${sectionHtml(SECTIONS.find(x => x.id === 'caminhos'))}`;
       return `<h2>Serviços</h2>${intro}${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
         ${discListHtml(disc, true)}
@@ -1626,6 +1653,7 @@ async function saveSection(form) {
       body: JSON.stringify({section: id, values})}));
     if (r.ok) {
       toast('Guardado');
+      forgetDiscovery(); // the mirror, the network or the zone may be others now
       form.removeAttribute('data-dirty');
       document.activeElement?.blur();
       secChecks[id] = CHECKED.includes(id) ? '<li class="muted">A verificar…</li>' : '';
