@@ -250,6 +250,7 @@ type SvcState struct {
 	Msg        string    `json:"msg,omitempty"`
 	MaintUntil time.Time `json:"maint_until,omitzero"`
 	Observed   bool      `json:"observed,omitempty"`
+	Forced     bool      `json:"forced,omitempty"` // a forced failover: stays on the TNAS until a forced return
 }
 
 type Event struct {
@@ -328,7 +329,8 @@ type Agent struct {
 	scanning   atomic.Bool
 	rescan     atomic.Bool // asked for while a scan ran
 	beats      map[string][]Beat
-	tnasSeen   bool // last TNAS ping, so a change is logged once
+	tnasSeen   bool              // last TNAS ping, so a change is logged once
+	certBad    map[string]string // host → its certificate's problem, so a change is told once
 	userPath   string
 	creds      atomic.Pointer[creds] // read by every request, so outside mu; nil: no account yet
 	started    time.Time             // the account can be made in the first 30 minutes after it
@@ -365,7 +367,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	a.events = evs
 	a.trimEvents()
 	a.tnasIP.Store(&cfg.TNASIP)
-	a.iconRev = map[string]string{}
+	a.iconRev, a.certBad = map[string]string{}, map[string]string{}
 	a.procRoute, a.ifaces = "/proc/net/route", systemIfaces
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
@@ -457,6 +459,22 @@ func (a *Agent) service(name string) (Service, bool) {
 	return a.cfg.Services[i], true
 }
 
+// noteCert tells once that host's certificate stopped verifying (an alert:
+// it will not renew itself while it goes unseen) and once that it is back.
+func (a *Agent) noteCert(host, bad string) {
+	was := a.certBad[host]
+	if was == bad {
+		return
+	}
+	if bad == "" {
+		delete(a.certBad, host)
+		a.event("", "certificado de "+host+" válido outra vez")
+		return
+	}
+	a.certBad[host] = bad
+	a.alert("", bad+"; conta como a responder, sem failover")
+}
+
 // warn records a repeating problem once, not every tick.
 func (a *Agent) warn(msg *string, svc, m string) {
 	if *msg != m {
@@ -485,7 +503,7 @@ func (a *Agent) Preflight() {
 	check("ping ao router "+c.RouterIP, a.pingErr(c.RouterIP))
 	check("ping ao TNAS "+c.TNASIP, a.pingErr(c.TNASIP))
 	check("ping ao servidor "+c.Server.IP, a.pingErr(c.Server.IP))
-	check("NPM do servidor (https://"+c.Server.NPMCheckHost+")", a.sys.Check(c.Server.NPMCheckHost, c.Server.IP))
+	check("NPM do servidor (https://"+c.Server.NPMCheckHost+")", a.sys.Check(c.Server.NPMCheckHost, c.Server.IP)) // a CertError says so here
 	check("internet (registry-1.docker.io)", a.internetErr())
 	check("internet pelo DNS do TNAS "+c.TNASIP, a.sys.Resolve(c.TNASIP))
 	check("internet pelo DNS do servidor "+c.Server.IP, a.sys.Resolve(c.Server.IP))
@@ -506,6 +524,7 @@ type probe struct {
 	npmMs                                  int
 	svcOK                                  map[string]bool
 	svcMs                                  map[string]int
+	certs                                  map[string]string // host → its certificate's problem, "" when it verified
 }
 
 func (a *Agent) probe() probe {
@@ -514,12 +533,22 @@ func (a *Agent) probe() probe {
 	tnasNPM := a.st.TNASNPM.Snapshot != ""
 	a.mu.Unlock()
 
+	p := probe{routerOK: a.ping(c.RouterIP), tnasPing: a.ping(c.TNASIP), svcOK: map[string]bool{}, svcMs: map[string]int{}, certs: map[string]string{}}
+	var certMu sync.Mutex
+	check := func(host, ip string) bool {
+		bad, err := certOK(a.sys.Check(host, ip))
+		if err == nil {
+			certMu.Lock()
+			p.certs[host] = bad
+			certMu.Unlock()
+		}
+		return err == nil
+	}
 	timed := func(host, ip string) (bool, int) {
 		t := time.Now()
-		err := a.sys.Check(host, ip)
-		return err == nil, int(time.Since(t).Milliseconds())
+		ok := check(host, ip)
+		return ok, int(time.Since(t).Milliseconds())
 	}
-	p := probe{routerOK: a.ping(c.RouterIP), tnasPing: a.ping(c.TNASIP), svcOK: map[string]bool{}, svcMs: map[string]int{}}
 	if !p.routerOK {
 		return p
 	}
@@ -534,7 +563,7 @@ func (a *Agent) probe() probe {
 		}
 	}
 	if tnasNPM {
-		wg.Go(func() { p.tnasNPMOK = a.sys.Check(c.Server.NPMCheckHost, c.TNASIP) == nil })
+		wg.Go(func() { p.tnasNPMOK = check(c.Server.NPMCheckHost, c.TNASIP) })
 	}
 	wg.Go(func() { p.tnasNet = a.sys.Resolve(c.TNASIP) == nil })
 	wg.Go(func() { p.serverNet = a.sys.Resolve(c.Server.IP) == nil })
@@ -598,6 +627,9 @@ func (a *Agent) record(p probe) {
 func (a *Agent) evaluate(p probe) {
 	c, st := &a.cfg, &a.st
 	a.record(p)
+	for h, bad := range p.certs {
+		a.noteCert(h, bad)
+	}
 	if !st.MaintUntil.IsZero() && !a.now.Before(st.MaintUntil) {
 		st.MaintUntil = time.Time{}
 		a.event("", "manutenção global terminou")
@@ -673,6 +705,9 @@ func (a *Agent) serverNPM(p probe) (known bool) {
 func (a *Agent) set(s *SvcState, state string) {
 	s.State, s.Since = state, a.now
 	s.FailSince, s.OKSince, s.Observed, s.Msg = time.Time{}, time.Time{}, false, ""
+	if state != FailingOver && state != Active { // a forced failover lasts until it is left
+		s.Forced = false
+	}
 }
 
 // step advances one service; known=false means its server side could not be checked.
@@ -724,6 +759,9 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 		if s.OKSince.IsZero() {
 			s.OKSince = a.now
 		}
+		if s.Forced { // asked for by hand: only a forced return ends it
+			return
+		}
 		if a.now.Sub(s.OKSince) < minutes(sv.StabilityMin) {
 			return
 		}
@@ -757,8 +795,9 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 		return
 	}
 	// R5: the copy is checked through the TNAS NPM; DNS only after it is healthy.
-	err := a.sys.Check(sv.Host, c.TNASIP)
+	bad, err := certOK(a.sys.Check(sv.Host, c.TNASIP))
 	if err == nil {
+		a.noteCert(sv.Host, bad)
 		err = a.addDNS(sv, s)
 	}
 	if err != nil {

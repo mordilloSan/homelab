@@ -311,7 +311,8 @@ func (a *Agent) postAction(w http.ResponseWriter, r *http.Request) {
 	// From ERROR only once the cleanup finished, otherwise return first.
 	case req.Action == "failover" && (s.State == Normal || s.State == Error && s.Snapshot == "" && !s.DNS):
 		a.set(s, FailingOver)
-		a.done(w, req.Service, "failover forçado")
+		s.Forced = true
+		a.done(w, req.Service, "failover forçado: fica no TNAS até um regresso forçado")
 	case req.Action == "return" && (s.State == FailingOver || s.State == Active || s.State == Error):
 		a.set(s, Returning)
 		a.done(w, req.Service, "regresso forçado")
