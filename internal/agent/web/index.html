@@ -125,6 +125,9 @@ input[type=number]:hover { border-color: color-mix(in srgb, var(--text), transpa
   box-shadow: inset 0 1px 1px rgba(255,255,255,.4), inset 0 -2px 4px rgba(0,0,0,.15), 0 6px 14px -6px rgba(32,82,194,.8); }
 .logo .icon { width: 24px; height: 24px; }
 .brand h1 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+.brand-row { display: flex; align-items: baseline; gap: 8px; }
+.version { color: var(--muted); font-size: 12.5px; text-decoration: none; font-variant-numeric: tabular-nums; }
+.version:hover { color: var(--text); text-decoration: underline; }
 .top-meta { display: flex; align-items: center; gap: 0; flex-wrap: wrap; margin-left: auto; }
 .top-meta .live { margin-right: 10px; }
 .page { display: grid; gap: 20px; }
@@ -313,13 +316,6 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .duration { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 
 /* services */
-.section-head { display: flex; align-items: center; gap: 12px; margin: 4px 4px -4px; }
-.section-head h2 { font-size: 15px; font-weight: 600; }
-.section-head #svcSearch { margin-left: auto; width: min(240px, 40vw); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--divider);
-  background: var(--well); }
-.section-head #svcSearch[hidden] + .icon-btn { margin-left: auto; }
-.add-btn { color: var(--primary); }
-.add-btn .icon { width: 22px; height: 22px; }
 /* under the topology: the services, then the events with their own scroll */
 .lower { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .svc-col { display: grid; gap: 16px; min-width: 0; }
@@ -468,9 +464,12 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   .wires { display: none; }
   .clients { margin-bottom: 14px; }
   .probe { left: 50%; top: 0; }
-  .lane { grid-template: auto auto / minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: ". label" "pills pills";
-    align-items: center; column-gap: 12px; padding: 14px 0; }
-  .lane-label { justify-self: start; align-self: center; white-space: normal; }
+  /* only the mode, centred on the link; the label goes */
+  .lane { grid-template: auto / minmax(0, 1fr); grid-template-areas: "pills"; align-items: center; padding: 14px 0; }
+  .lane-label { display: none; }
+  .lane-under { margin-top: 0; }
+  .sm-hide { display: none !important; }
+  .hero-foot .router { flex-basis: 100%; } /* the maintenance and its time share the line below */
   .lane-pills:empty { display: none; }
   .flow { left: 50%; right: auto; top: 0; bottom: 0; width: 2px; height: auto; margin: 0 0 0 -1px;
     background: repeating-linear-gradient(180deg, var(--divider) 0 6px, transparent 6px 12px); }
@@ -489,7 +488,8 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 <body>
 <main>
   <header class="top">
-    <a class="brand" href="#/" title="Visão geral"><span class="logo" data-icon="swap"></span><h1>Failover do homelab</h1></a>
+    <div class="brand-row"><a class="brand" href="#/" title="Visão geral"><span class="logo" data-icon="swap"></span><h1>Failover do homelab</h1></a>
+      <a class="version" id="version" target="_blank" rel="noopener" title="Esta versão no GitHub"></a></div>
     <div class="top-meta">
       <span class="live" id="live"><span class="dot"></span><span id="liveText">A ligar ao agente…</span></span>
       <a class="icon-btn" href="#/definicoes" aria-label="Definições" title="Definições" data-icon="cog"></a>
@@ -520,9 +520,6 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
   <div class="lower">
     <div class="svc-col">
-      <div class="section-head"><h2>Serviços</h2><span class="muted" id="svcCount"></span>
-        <input type="search" id="svcSearch" placeholder="Procurar serviço…" aria-label="Procurar serviço" hidden>
-        <button class="icon-btn add-btn" data-panel="svcEdit" aria-haspopup="dialog" aria-label="Adicionar serviço" title="Adicionar um serviço à mão (os descobertos estão em Definições)" data-icon="plus"></button></div>
       <div class="grid" id="svcs"></div>
     </div>
     <section class="card ev-card" aria-label="Eventos">
@@ -553,7 +550,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
     <div class="settings">
       <nav class="toc" aria-label="Secções das definições">
         <a href="#/definicoes/geral" data-sub="geral">Geral</a>
-        <a href="#/definicoes/descobrir" data-sub="descobrir">Descobrir serviços</a>
+        <a href="#/definicoes/servicos" data-sub="servicos">Serviços</a>
         <a href="#/definicoes/rede" data-sub="rede">Rede</a>
         <a href="#/definicoes/verificacao" data-sub="verificacao">Verificação</a>
         <a href="#/definicoes/dns" data-sub="dns">DNS</a>
@@ -814,14 +811,14 @@ function renderTopology() {
       <span class="node-icon st st-${health.s}" title="${esc(health.why)}">${icon(ic)}</span>
       <span class="node-id"><span class="node-title">${title}</span><span class="mono muted">${esc(ip)}</span></span>
       <span class="node-end">${chipHtml}</span></button>
-    <div class="node-meta ${meta.warn ? 'warn' : ''}">${icon(meta.icon)}<span>${esc(meta.text)}</span></div>
+    <div class="node-meta ${meta.warn ? 'warn' : ''} ${meta.cls || ''}">${icon(meta.icon)}<span>${esc(meta.text)}</span></div>
     <div class="pills" data-drop="${kind}">${list.length ? list.map(pill).join(' ') : `<span class="empty">${empty}</span>`}</div>
     ${kind === 'server' ? `<div class="node-beats">${beatsBlock('npm')}</div>` : ''}`;
 
   // FLIP: remember where every pill was, redraw, then slide each moved pill from there.
   const before = new Map([...document.querySelectorAll('.topo [data-flip]')].map(el => [el.dataset.flip, el.getBoundingClientRect()]));
   paint('nodeServer', node('server', 'server', 'Servidor', st.server_ip, serverChip(),
-    {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`}, at.server, 'Nenhum serviço no servidor', serverHealth()));
+    {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`, cls: 'sm-hide'}, at.server, 'Nenhum serviço no servidor', serverHealth()));
   paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), imagesMeta(), at.tnas, 'Nenhuma cópia a servir', tnasHealth()));
   const lane = $('lane'), back = at.moving.length > 0 && at.moving.every(s => s.state === 'RETURNING') && !at.tnas.length;
   // the link shows the checks (probePulse marks each one) and services on their way; client traffic is on the wires
@@ -862,7 +859,8 @@ function renderTopology() {
   }
   firstTopo = false;
 
-  paint('router', `${chip(st.router_ok ? 'Router acessível' : 'Router inacessível', st.router_ok ? 'var(--success)' : 'var(--error)', st.router_ok ? 'xs quiet' : 'xs')}<span class="mono muted">${esc(st.router_ip)}</span>`);
+  // on a small screen only "Router": the colour says the rest
+  paint('router', `<span class="chip xs ${st.router_ok ? 'quiet' : ''}" style="--c:${st.router_ok ? 'var(--success)' : 'var(--error)'}">${st.router_ok ? '<span class="dot"></span>' : ''}<span>Router<span class="sm-hide"> ${st.router_ok ? 'acessível' : 'inacessível'}</span></span></span><span class="mono muted">${esc(st.router_ip)}</span>`);
   probePulse();
 }
 
@@ -932,10 +930,13 @@ function probePulse() {
 }
 
 function renderGlobal() {
+  const rel = /^v\d/.test(st.version) ? `/releases/tag/${encodeURIComponent(st.version)}` : ''; // a dev build has no release
+  $('version').textContent = st.version;
+  $('version').href = `https://github.com/mordilloSan/homelab${rel}`;
   const g = $('maintGlobal'), busy = pending.has('maint:');
   g.checked = busy ? pending.get('maint:') : !!st.maint_until;
   g.disabled = busy;
-  $('maintGlobalText').textContent = busy ? 'A aplicar…' : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}` : 'Manutenção global';
+  $('maintGlobalText').innerHTML = busy ? 'A aplicar…' : `Manutenção<span class="sm-hide"> global</span>${st.maint_until ? ` até ${esc(clock(st.maint_until))}` : ''}`;
   const banner = !st.router_ok ? 'O router não responde. O agente não decide nada até ele voltar.'
     : !st.dns_token ? 'Falta o token do Technitium: sem ele um failover dá erro logo no início. Põe-no em Definições.'
     : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}. Nenhum failover começa; os regressos continuam.` : '';
@@ -968,10 +969,7 @@ const actions = s => `${maintSwitch(s)}<span>${actionButton(s, 'failover', canFa
 // Compact cards: what it is, where it runs, how the last checks went. Everything else is in its panel.
 const lastMs = name => { const b = st.beats?.[name]; const l = b?.[b.length - 1]; return l?.s === 'up' ? ` · ${l.ms} ms` : ''; };
 function renderServices() {
-  const q = norm($('svcSearch').value.trim());
-  $('svcSearch').hidden = st.services.length < 8;
-  const shown = st.services.filter(s => !q || norm(s.name).includes(q) || norm(s.host).includes(q));
-  paint('svcs', shown.map(s => {
+  paint('svcs', st.services.map(s => {
     const S = look(s);
     return `<article class="card svc ${fine(s) ? '' : 'alert'}" id="svc-${esc(s.name)}" data-panel="svc" data-svc="${esc(s.name)}" style="--accent:${S.c}">
       <div class="svc-top"><span class="svc-icon">${svcIcon(s.name)}</span>
@@ -980,10 +978,8 @@ function renderServices() {
       ${fine(s) ? `<p class="svc-line">No servidor${lastMs(s.name)}</p>` : statusBlock(s)}
       <div class="beats" data-beats="${esc(s.name)}" role="img" aria-label="Últimas verificações"></div>
     </article>`;
-  }).join('') || '<p class="empty">Nenhum serviço com esse nome.</p>');
+  }).join('') || '<p class="empty">Nenhum serviço protegido. Adiciona-os em <a href="#/definicoes/servicos">Definições → Serviços</a>.</p>');
   fillBeats();
-  const away = st.services.filter(s => s.state !== 'NORMAL').length;
-  $('svcCount').textContent = `${st.services.length}${away ? `, ${away} fora do normal` : ''}`;
 }
 
 function evTone(m) {
@@ -1397,7 +1393,7 @@ const paintSec = (id, html) => paintGuarded(`set-${id}`, html);
 function repaintSec(id) { painted[`set-${id}`] = null; renderSettings(); repaintSetup(); }
 function renderSettings() {
   if (!$('set-geral')) {
-    $('settingsBody').innerHTML = ['geral', 'descobrir', ...SECTIONS.map(x => x.id), 'conta'].map(id => `<section class="card set-sec" id="set-${id}"></section>`).join('');
+    $('settingsBody').innerHTML = ['geral', 'servicos', ...SECTIONS.map(x => x.id), 'conta'].map(id => `<section class="card set-sec" id="set-${id}"></section>`).join('');
   }
   const mode = pending.has('mode') ? pending.get('mode') : st.mode;
   const iv = pending.has('interval') ? pending.get('interval') : st.check_interval_s;
@@ -1409,10 +1405,11 @@ function renderSettings() {
       </fieldset>
       <label class="field">Verificar o servidor a cada <select id="interval" ${pending.has('interval') ? 'disabled' : ''}>
         ${ivs.map(v => `<option value="${v}" ${v === iv ? 'selected' : ''}>${secs(v)}</option>`).join('')}</select></label>`);
-  if (currentTab() === 'settings' && !disc && !discErr && !discing) getDiscovery().then(() => repaintSec('descobrir'), () => repaintSec('descobrir'));
+  if (currentTab() === 'settings' && !disc && !discErr && !discing) getDiscovery().then(() => repaintSec('servicos'), () => repaintSec('servicos'));
   const discNew = disc?.services.filter(x => !x.configured) || [];
-  paintSec('descobrir', `<h2>Descobrir serviços</h2>
-      <p class="note-text wiz-intro">As pastas do espelho com docker-compose.yml, com o endereço que o NPM lhes dá. "Adicionar" abre o formulário já preenchido.</p>
+  paintSec('servicos', `<h2>Serviços</h2>
+      <p class="note-text wiz-intro">As pastas do espelho com docker-compose.yml, com o endereço que o NPM lhes dá. "Adicionar" abre o formulário já preenchido; um serviço que não está no espelho adiciona-se à mão.</p>
+      <div class="sec-btns" style="margin-bottom:8px"><button type="button" class="btn contained" data-panel="svcEdit" aria-haspopup="dialog">${icon('plus')}Adicionar à mão</button></div>
       ${!disc ? discWaiting('A procurar no espelho…') : `${disc.npm.found ? '' : '<p class="note-text">Não encontrei os proxy hosts do NPM no espelho: os endereços ficam por preencher.</p>'}
         ${discListHtml(disc, false)}
         <div class="sec-btns"><span class="muted">${discNew.length ? plural(discNew.length, 'por proteger', 'por proteger') : 'Todos protegidos'}</span>
@@ -1509,7 +1506,7 @@ document.addEventListener('click', async e => {
     discErr = '';
     forgetDiscovery();
     repaintSetup();
-    painted['set-descobrir'] = null;
+    painted['set-servicos'] = null;
     renderSettings();
     return;
   }
@@ -2066,7 +2063,6 @@ document.addEventListener('submit', async e => {
     save.disabled = false;
   }
 });
-$('svcSearch').addEventListener('input', renderServices);
 document.addEventListener('input', e => {
   if (e.target.id === 'evQuery' || e.target.id === 'evSvc') { evShown = 100; renderEvents(); }
 });

@@ -33,7 +33,8 @@ docker compose pull && docker compose up -d
 - **Página principal:** a topologia (clientes, servidor, TNAS, internet), os serviços e os eventos.
 - **Forçar failover ou regresso:** arrasta um serviço do servidor para o TNAS, ou ao contrário, ou usa os botões no painel do serviço. Um failover forçado **fica no TNAS** até um regresso forçado; um automático volta sozinho.
 - **Manutenção** (global ou por serviço): bloqueia os failovers durante o tempo escolhido; os regressos continuam.
-- **Serviços:** **+** adiciona um à mão; Definições → Descobrir serviços lista as pastas do espelho ainda por proteger. A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.
+- **Serviços:** adicionam-se em Definições → Serviços, a partir das pastas do espelho ou à mão. A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.
+- **Versão:** ao lado do nome, no topo; leva à release no GitHub.
 - **Ícones:** o nome de um ícone do [dashboardicons.com](https://dashboardicons.com), ou o link da sua página. Vazio: o do nome ou da pasta.
 - **Avisos por email:** failover, regresso, erro, NPM do servidor em falha, router, certificado inválido e o agente a reiniciar. Os de uma mesma verificação seguem num só email. Um envio falhado tenta-se de novo durante um dia.
 - **Eventos:** 30 dias, com filtro, procura e exportação para CSV.
