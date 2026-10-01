@@ -344,13 +344,17 @@ export function renderGlobal() {
   const rel = /^v\d/.test(st.version) ? `/releases/tag/${encodeURIComponent(st.version)}` : ''; // a dev build has no release
   $('version').textContent = st.version;
   $('version').href = `https://github.com/mordilloSan/homelab${rel}`;
-  const g = $('maintGlobal'), busy = pending.has('maint:');
-  g.checked = busy ? pending.get('maint:') : !!st.maint_until;
-  g.disabled = busy;
-  $('maintGlobalText').innerHTML = busy ? 'A aplicar…' : `Manutenção<span class="sm-hide"> global</span>${st.maint_until ? ` até ${esc(clock(st.maint_until))}` : ''}`;
+  const m = $('maintBtn'), busy = pending.has('maint:'), on = busy ? pending.get('maint:') : !!st.maint_until;
+  const label = busy ? 'A aplicar…' : on ? `Manutenção do servidor até ${clock(st.maint_until)}. Carrega para desligar` : 'Manutenção do servidor';
+  m.classList.toggle('on', on);
+  m.disabled = busy;
+  m.setAttribute('aria-pressed', String(on));
+  m.title = label;
+  m.setAttribute('aria-label', label);
+  paint('maintBtn', `${icon('wrench')}${on ? `<span>${busy ? 'A aplicar…' : `até ${esc(clock(st.maint_until))}`}</span>` : ''}`);
   const banner = !st.router_ok ? 'O router não responde. O agente não decide nada até ele voltar.'
     : !st.dns_token ? 'Falta o token do Technitium: sem ele um failover dá erro logo no início. Põe-no em Definições.'
-    : st.maint_until ? `Manutenção global até ${clock(st.maint_until)}. Nenhum failover começa; os regressos continuam.` : '';
+    : st.maint_until ? `Manutenção do servidor até ${clock(st.maint_until)}. Nenhum failover começa; os regressos continuam.` : '';
   $('banner').hidden = !banner;
   $('banner').style.setProperty('--c', st.router_ok ? 'var(--warning)' : 'var(--error)');
   $('bannerText').textContent = banner;
