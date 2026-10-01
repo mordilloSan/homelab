@@ -102,8 +102,8 @@ func (f *fake) Run(name string, args ...string) error {
 		}
 	}
 	switch {
-	case name == "btrfs" && args[1] == "snapshot":
-		return os.Mkdir(args[3], 0o755)
+	case name == "btrfs" && args[1] == "create":
+		return os.Mkdir(args[2], 0o755)
 	case name == "btrfs" && args[1] == "delete":
 		return os.Remove(args[2])
 	}
@@ -331,7 +331,7 @@ func TestFailoverWithoutToken(t *testing.T) {
 	f.down["bitwarden.engmariz.com@"+srv] = true
 	at := t0
 	tickTo(a, &at, 5)
-	if s := a.st.Services["vaultwarden"]; s.State != Error || s.Snapshot != "" || !strings.Contains(s.Msg, "token") || f.ran("btrfs subvolume snapshot") >= 0 {
+	if s := a.st.Services["vaultwarden"]; s.State != Error || s.Snapshot != "" || !strings.Contains(s.Msg, "token") || f.ran("btrfs subvolume create") >= 0 {
 		t.Fatalf("sem token: estado %s, msg %q, comandos %v", s.State, s.Msg, f.cmds)
 	}
 }
@@ -349,7 +349,7 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 	tickTo(a, &at, 5)
 	wantStates(t, a, map[string]string{"vaultwarden": Active, "homepage": Normal, "immich": Normal, "unifi": Normal})
 	npmUp, vwUp := f.ran("docker compose -p failover-npm -f"), f.ran("docker compose -p failover-vaultwarden -f")
-	if npmUp < 0 || vwUp < npmUp || f.ran("btrfs subvolume snapshot /Volume1/ServerBackup") > npmUp {
+	if npmUp < 0 || vwUp < npmUp || f.ran("cp -dR --reflink=always --preserve=mode,ownership,timestamps /Volume1/ServerBackup/.") > npmUp {
 		t.Fatalf("arranque errado: %v", f.cmds)
 	}
 	if !strings.Contains(f.cmds[vwUp], "/homelab/vaultwarden/docker-compose.yml up -d") {
@@ -520,7 +520,7 @@ func TestUnifiIPBusy(t *testing.T) {
 	at := t0
 	tickTo(a, &at, 15)
 	wantStates(t, a, map[string]string{"unifi": Error})
-	if f.ran("btrfs subvolume snapshot") >= 0 || f.ran("docker compose -p failover-unifi -f") >= 0 {
+	if f.ran("btrfs subvolume create") >= 0 || f.ran("docker compose -p failover-unifi -f") >= 0 {
 		t.Fatalf("arrancou com o IP ocupado: %v", f.cmds)
 	}
 	tickTo(a, &at, 40)

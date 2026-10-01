@@ -1192,10 +1192,28 @@ func (a *Agent) snapshot(name string) (string, error) {
 	p := a.cfg.Paths
 	dst := filepath.Join(p.SnapshotsDir, "failover-"+name+"-"+a.now.Format("20060102-150405"))
 	_ = os.MkdirAll(p.SnapshotsDir, 0o755) // if this fails, btrfs says so
-	if err := a.sys.Run("btrfs", "subvolume", "snapshot", p.MirrorSubvol, dst); err != nil {
+	if err := a.copyMirror(p.MirrorSubvol, dst); err != nil {
 		return "", err
 	}
 	return dst, nil
+}
+
+// copyMirror makes a copy's "snapshot": a new subvolume with the mirror
+// reflinked into it, not a btrfs snapshot. TOS keeps its share permissions
+// with the files (the + in ls -l), so a snapshot carries them, and with them
+// only root and each folder's owner get in: a container's own users (postgres,
+// rabbitmq...) are refused through parents they do not own. A reflink copy
+// shares the data blocks (seconds, almost no space) and leaves them behind,
+// as long as snapshots_dir is outside the shares, where new files get them too.
+func (a *Agent) copyMirror(src, dst string) error {
+	if err := a.sys.Run("btrfs", "subvolume", "create", dst); err != nil {
+		return err
+	}
+	if err := a.sys.Run("cp", "-dR", "--reflink=always", "--preserve=mode,ownership,timestamps", src+"/.", dst); err != nil {
+		_ = a.sys.Run("btrfs", "subvolume", "delete", dst)
+		return fmt.Errorf("cópia do espelho com reflink falhou: %w", err)
+	}
+	return nil
 }
 
 // down removes a compose project's containers and named volumes (O3), then
