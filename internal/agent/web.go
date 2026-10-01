@@ -6,12 +6,13 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	_ "embed"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,11 @@ import (
 
 //go:embed web/index.html
 var indexHTML []byte
+
+// The page's stylesheet and its JS modules, served next to it.
+//
+//go:embed web/app.css web/js
+var webFS embed.FS
 
 // The app's icon (the header's logo, with room around it for a phone's mask)
 // and the manifest that lets a phone install the page on its home screen.
@@ -77,6 +83,10 @@ func (a *Agent) Handler() http.Handler {
 		}
 		writeBody(w, r, "text/html; charset=utf-8", indexHTML, indexGz)
 	})
+	web, _ := fs.Sub(webFS, "web") // cannot fail: "web" is a valid path
+	assets := http.FileServerFS(web)
+	mux.Handle("GET /app.css", assets)
+	mux.Handle("GET /js/", assets)
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		v := a.view.Load()
 		writeBody(w, r, "application/json", v.raw, v.gz)

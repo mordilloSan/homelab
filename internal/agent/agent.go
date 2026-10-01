@@ -478,6 +478,9 @@ func (a *Agent) Run(ctx context.Context) {
 		a.Tick(time.Now())
 		a.mu.Lock()
 		d := time.Duration(a.cfg.CheckIntervalS) * time.Second
+		if a.waiting() {
+			d = min(d, fastCheck)
+		}
 		a.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -486,6 +489,23 @@ func (a *Agent) Run(ctx context.Context) {
 		case <-a.wake:
 		}
 	}
+}
+
+// fastCheck is the check interval while a service waits out wait_min or
+// stability_min: its failover or return starts seconds after the wait ends,
+// not up to a whole check interval later. The waits themselves do not change.
+const fastCheck = 5 * time.Second
+
+// waiting says whether a service is failing before its failover, or back on
+// the server before its return; under mu. One only observed (mode observação)
+// or forced has nothing to start, so it does not count.
+func (a *Agent) waiting() bool {
+	for _, s := range a.st.Services {
+		if !s.Observed && (s.State == Normal && !s.FailSince.IsZero() || s.State == Active && !s.OKSince.IsZero() && !s.Forced) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) poke() {
@@ -1199,12 +1219,13 @@ func (a *Agent) snapshot(name string) (string, error) {
 }
 
 // copyMirror makes a copy's "snapshot": a new subvolume with the mirror
-// reflinked into it, not a btrfs snapshot. TOS keeps its share permissions
-// with the files (the + in ls -l), so a snapshot carries them, and with them
-// only root and each folder's owner get in: a container's own users (postgres,
-// rabbitmq...) are refused through parents they do not own. A reflink copy
-// shares the data blocks (seconds, almost no space) and leaves them behind,
-// as long as snapshots_dir is outside the shares, where new files get them too.
+// reflinked into it, not a btrfs snapshot. In a TOS share every new file
+// inherits the share's permissions (the + in ls -l), and with them only root
+// and each folder's owner get in: a container's own users (postgres,
+// rabbitmq...) are refused through parents they do not own. The mirror's files
+// have them, and a snapshot keeps them. A new subvolume inherits nothing, even
+// inside a share, and cp does not copy them; the reflink shares the data
+// blocks (seconds, almost no space).
 func (a *Agent) copyMirror(src, dst string) error {
 	if err := a.sys.Run("btrfs", "subvolume", "create", dst); err != nil {
 		return err

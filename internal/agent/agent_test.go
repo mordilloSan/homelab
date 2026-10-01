@@ -802,3 +802,28 @@ func TestServerDownMailed(t *testing.T) {
 		t.Fatalf("regresso do servidor: %v", a.events[len(a.events)-3:])
 	}
 }
+
+// A service waiting out wait_min or stability_min makes the checks fast;
+// one only observed, or forced, does not.
+func TestWaiting(t *testing.T) {
+	a, _ := setup(t)
+	s := a.st.Services["vaultwarden"]
+	cases := []struct {
+		name string
+		set  func()
+		want bool
+	}{
+		{"todos bem", func() {}, false},
+		{"em falha antes do failover", func() { s.FailSince = t0 }, true},
+		{"em falha, só observado", func() { s.Observed = true }, false},
+		{"no TNAS, servidor de volta", func() { *s = SvcState{State: Active, OKSince: t0} }, true},
+		{"no TNAS, forçado", func() { s.Forced = true }, false},
+		{"no TNAS, servidor ainda em baixo", func() { *s = SvcState{State: Active} }, false},
+	}
+	for _, c := range cases {
+		c.set()
+		if got := a.waiting(); got != c.want {
+			t.Errorf("%s: waiting %v, esperado %v", c.name, got, c.want)
+		}
+	}
+}

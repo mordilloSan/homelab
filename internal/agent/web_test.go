@@ -352,6 +352,18 @@ func TestEventsAPI(t *testing.T) {
 	}
 }
 
+// The page's stylesheet and modules are served, with their types.
+func TestAssets(t *testing.T) {
+	a, _ := setup(t)
+	for path, ctype := range map[string]string{"/app.css": "text/css", "/js/main.js": "text/javascript"} {
+		w := httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, withSession(a, httptest.NewRequest(http.MethodGet, path, nil)))
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), ctype) {
+			t.Fatalf("%s: HTTP %d %s", path, w.Code, w.Header().Get("Content-Type"))
+		}
+	}
+}
+
 // withSession adds a live session cookie to r.
 func withSession(a *Agent, r *http.Request) *http.Request {
 	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: a.sessions.create()})
