@@ -22,6 +22,8 @@ type fake struct {
 	cmds     []string        // every command except ping, in order
 	gets     []string        // every URL fetched
 	badCert  map[string]bool // host → its certificate does not verify
+	busy     map[string]bool // "tcp 10.0.0.1:443" → something listens there
+	slow     map[string]int  // host@ip → checks it still fails before it answers
 	noPing   map[string]bool // ip → does not answer ping
 	down     map[string]bool // "host@ip" → HTTPS check fails
 	failCmd  []string        // command prefixes that fail
@@ -54,6 +56,15 @@ func mailed(f *fake, sub string) bool {
 }
 
 func (f *fake) GetIcon(u string) ([]byte, error) { return f.Get(u, "") }
+
+func (f *fake) PortFree(proto, addr string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.busy[proto+" "+addr] {
+		return errors.New("address already in use")
+	}
+	return nil
+}
 
 func (f *fake) Resolve(ip string) error {
 	f.mu.Lock()
@@ -115,6 +126,10 @@ func (f *fake) Check(host, ip string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.down[host+"@"+ip] {
+		return errors.New("HTTP 502")
+	}
+	if n := f.slow[host+"@"+ip]; n > 0 { // a copy that answers after n more checks
+		f.slow[host+"@"+ip] = n - 1
 		return errors.New("HTTP 502")
 	}
 	if f.badCert[host] {
@@ -181,7 +196,8 @@ func newTestAgent(t *testing.T, dir string, f *fake) *Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(a.iconJobs.Wait) // before the temporary folder goes
+	a.sleep = func(time.Duration) {} // the copy's 5 s polls, instant
+	t.Cleanup(a.iconJobs.Wait)       // before the temporary folder goes
 	t.Cleanup(a.mailJobs.Wait)
 	return a
 }
@@ -498,8 +514,9 @@ func TestUnifiIPBusy(t *testing.T) {
 		t.Fatalf("arrancou com o IP ocupado: %v", f.cmds)
 	}
 	tickTo(a, &at, 40)
-	if n := strings.Count(strings.Join(f.cmds, "\n"), "arping"); n != 1 {
-		t.Fatalf("repetiu o failover em ERROR (%d arpings)", n)
+	// tried again every start_timeout_min (10) while the server is down, never every tick
+	if n := strings.Count(strings.Join(f.cmds, "\n"), "arping"); n < 2 || n > 4 {
+		t.Fatalf("%d arpings em 25 min de ERROR: queria uma nova tentativa a cada 10 min", n)
 	}
 	delete(f.down, "unifi.engmariz.com@"+srv)
 	tickTo(a, &at, 41)
@@ -524,6 +541,77 @@ func TestStartTimeout(t *testing.T) {
 	}
 	if left, _ := os.ReadDir(a.cfg.Paths.SnapshotsDir); len(left) != 0 {
 		t.Fatalf("sobraram snapshots: %v", left)
+	}
+}
+
+// A copy that answers a few seconds after compose up is caught in the same
+// tick, polled every 5 s: the DNS does not wait for the next check.
+func TestCopyPolledInTick(t *testing.T) {
+	a, f := setup(t)
+	var slept []time.Duration
+	a.sleep = func(d time.Duration) { slept = append(slept, d) }
+	f.down["bitwarden.engmariz.com@"+srv] = true
+	f.slow = map[string]int{"bitwarden.engmariz.com@" + tnas: 2}
+	at := t0
+	for end := t0.Add(minutes(10)); !at.After(end); at = at.Add(time.Minute) {
+		a.Tick(at)
+		if st := state(a, "vaultwarden"); st == FailingOver {
+			t.Fatalf("%s: a cópia respondeu dentro do tick e o estado ficou %s", at.Format("15:04"), st)
+		}
+	}
+	wantStates(t, a, map[string]string{"vaultwarden": Active})
+	if len(slept) != 2 || slept[0] != copyPoll*time.Second {
+		t.Fatalf("esperas entre verificações da cópia: %v", slept)
+	}
+}
+
+// state.json is written when it changes, not on every quiet check.
+func TestSaveOnlyWhenChanged(t *testing.T) {
+	a, _ := setup(t)
+	a.Tick(t0)
+	if err := os.Remove(a.statePath); err != nil {
+		t.Fatal(err)
+	}
+	a.Tick(t0.Add(time.Minute))
+	if fileExists(a.statePath) {
+		t.Fatal("state.json reescrito sem mudanças")
+	}
+	a.mu.Lock()
+	a.st.MaintUntil = t0.Add(time.Hour)
+	a.save()
+	a.mu.Unlock()
+	if !fileExists(a.statePath) {
+		t.Fatal("state.json não gravado depois de uma mudança")
+	}
+}
+
+// Images the scan did not find are pulled as a step of their own before
+// compose up; a pull that fails is the failover's error.
+func TestPullMissingBeforeUp(t *testing.T) {
+	a, f := setup(t)
+	a.st.Images = map[string]Stack{"vaultwarden": {Images: []Image{{Ref: "vaultwarden/server:latest"}}}}
+	f.down["bitwarden.engmariz.com@"+srv] = true
+	at := t0
+	tickTo(a, &at, 6)
+	wantStates(t, a, map[string]string{"vaultwarden": Active})
+	pull, up := f.ran("docker compose -p failover-vaultwarden -f "), -1
+	for i, c := range f.cmds {
+		if strings.HasPrefix(c, "docker compose -p failover-vaultwarden") && strings.HasSuffix(c, "up -d") {
+			up = i
+		}
+	}
+	if pull < 0 || !strings.HasSuffix(f.cmds[pull], "pull --policy missing -q") || up < pull || !hasEvent(a, "a descarregar 1 imagem em falta no TNAS") {
+		t.Fatalf("pull antes do up: %v", f.cmds)
+	}
+
+	b, g := setup(t)
+	b.st.Images = a.st.Images
+	g.down["bitwarden.engmariz.com@"+srv] = true
+	g.failCmd = []string{"docker compose -p failover-vaultwarden -f"}
+	at = t0
+	tickTo(b, &at, 6)
+	if s := b.st.Services["vaultwarden"]; s.State != Error || !strings.Contains(s.Msg, "sem as imagens") {
+		t.Fatalf("pull falhado: %s %q", s.State, s.Msg)
 	}
 }
 
@@ -607,9 +695,13 @@ func TestDeleteSnapshotGuard(t *testing.T) {
 func TestScanImages(t *testing.T) {
 	a, f := setup(t)
 	buf := logs(t)
+	f.busy = map[string]bool{"tcp :2283": true}
+	f.failCmd = []string{"docker network inspect proxy"}
 	f.outs = map[string]string{
-		"docker compose -p failover-immich":                             "ghcr.io/immich-app/immich-server:v2\nredis:7\nredis:7\n",
-		"docker compose -p failover-":                                   "vaultwarden/server:latest\n",
+		// two services on redis:7: listed once; an external network the TNAS lacks; a port taken
+		"docker compose -p failover-immich": `{"name":"failover-immich","services":{"server":{"image":"ghcr.io/immich-app/immich-server:v2","ports":[{"published":"2283","protocol":"tcp"}]},
+			"redis":{"image":"redis:7"},"cache":{"image":"redis:7"}},"networks":{"proxy":{"name":"proxy","external":true}}}`,
+		"docker compose -p failover-":                                   `{"name":"x","services":{"vaultwarden":{"image":"vaultwarden/server:latest"}}}`,
 		"docker image inspect --format {{.Size}} {{.Created}} redis:7":  "41000000 2026-09-20T04:00:00.5Z\n",
 		"docker image inspect --format {{.Size}} {{.Created}} vaultwar": "250000000 2026-09-21T04:00:00Z\n",
 	}
@@ -621,8 +713,11 @@ func TestScanImages(t *testing.T) {
 	if v := a.st.Images["vaultwarden"].Images; len(v) != 1 || !v[0].Present || a.st.Images["npm"].Images == nil {
 		t.Fatalf("imagens: %+v", a.st.Images)
 	}
+	if n := a.st.Images["immich"].Notes; len(n) != 2 || !strings.Contains(n[0], "a rede proxy não existe no TNAS") || !strings.Contains(n[1], "a porta 2283/tcp já está ocupada") {
+		t.Fatalf("pré-requisitos do TNAS: %q", n)
+	}
 	if !slices.ContainsFunc(f.scans, func(c string) bool {
-		return strings.Contains(c, "immich.override.yml config --images")
+		return strings.Contains(c, "immich.override.yml config --format json")
 	}) {
 		t.Fatalf("o scan do immich ignorou o override: %v", f.scans)
 	}
@@ -654,5 +749,30 @@ func TestInternetPerBox(t *testing.T) {
 	a.Tick(t0.Add(time.Minute))
 	if a.st.ServerNetOK {
 		t.Fatal("com o servidor em baixo, a internet dele mudou")
+	}
+}
+
+// The server falling is one email with the time; its return is an event.
+func TestServerDownMailed(t *testing.T) {
+	a, f := setup(t)
+	f.noPing[srv] = true
+	f.down[a.cfg.Server.NPMCheckHost+"@"+srv] = true
+	at := t0
+	tickTo(a, &at, 3)
+	a.mailJobs.Wait()
+	n := 0
+	for _, m := range f.mails {
+		if strings.Contains(m.Subject, "o servidor não responde") {
+			n++
+		}
+	}
+	if n != 1 || !mailed(f, "desde as "+t0.Format("15:04")) {
+		t.Fatalf("%d emails do servidor em baixo: %+v", n, f.mails)
+	}
+	delete(f.noPing, srv)
+	delete(f.down, a.cfg.Server.NPMCheckHost+"@"+srv)
+	tickTo(a, &at, 4)
+	if !hasEvent(a, "o servidor responde outra vez, depois de 4 min em baixo") || !a.st.ServerDown.IsZero() {
+		t.Fatalf("regresso do servidor: %v", a.events[len(a.events)-3:])
 	}
 }

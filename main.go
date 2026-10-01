@@ -145,6 +145,10 @@ func serve(ctx context.Context, cfgPath, statePath string) error {
 		ui = cfg.UI.Listen
 	}
 	slog.Info("failover-agent a correr", "version", version, "mode", cfg.Mode, "ui", ui)
+	go func() {
+		<-ctx.Done()
+		slog.Info("a terminar: a verificação em curso acaba primeiro")
+	}()
 	a.Preflight()
 	go a.Watchdog(ctx, func() error { return a.SelfCheck(cfg.UI.Listen) })
 	a.Run(ctx)

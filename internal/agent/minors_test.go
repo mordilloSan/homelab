@@ -114,7 +114,7 @@ func TestScanAgainWhenAsked(t *testing.T) {
 	a.scanImages()
 	n := 0
 	for _, c := range f.scans {
-		if strings.HasPrefix(c, "docker compose -p failover-npm") && strings.Contains(c, "config --images") {
+		if strings.HasPrefix(c, "docker compose -p failover-npm") && strings.Contains(c, "config --format json") {
 			n++
 		}
 	}

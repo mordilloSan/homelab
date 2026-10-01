@@ -102,6 +102,21 @@ func (RealSys) Check(host, ip string) error {
 	return nil
 }
 
+func (RealSys) PortFree(proto, addr string) error {
+	if strings.HasPrefix(proto, "udp") {
+		c, err := net.ListenPacket(proto, addr)
+		if err == nil {
+			_ = c.Close()
+		}
+		return err
+	}
+	l, err := net.Listen("tcp", addr)
+	if err == nil {
+		_ = l.Close()
+	}
+	return err
+}
+
 // Resolve asks the DNS resolver at ip for a name no cache holds, so the answer
 // has to come from the internet; NXDOMAIN counts as reached.
 func (RealSys) Resolve(ip string) error {

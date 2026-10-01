@@ -366,3 +366,19 @@ func TestTechnitiumLoginNoRights(t *testing.T) {
 		t.Fatalf("HTTP %d %s", code, body)
 	}
 }
+
+// The discovery says where a copy's data would not come from the mirror,
+// and ignores the host's own paths.
+func TestDataNotes(t *testing.T) {
+	js := `{"name":"fotos","services":{"app":{"image":"x","volumes":[
+		{"type":"bind","source":"/Volume1/ServerBackup/homelab/fotos/data"},{"type":"bind","source":"/mnt/fotos"},
+		{"type":"bind","source":"/var/run/docker.sock"},{"type":"volume","source":"db"}]}}}`
+	info, err := analyzeCompose([]byte(js), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := dataNotes(info, "/Volume1/ServerBackup")
+	if len(n) != 2 || !strings.Contains(n[0], "os dados de /mnt/fotos não estão no espelho") || !strings.Contains(n[1], "o volume db") {
+		t.Fatalf("%q", n)
+	}
+}

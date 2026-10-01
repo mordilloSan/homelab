@@ -6,9 +6,10 @@ Corre no TNAS e vigia os serviços do servidor (`.66`). Quando um falha, arranca
 
 A cada verificação (60 s por defeito), o agente pede `https://<serviço>` ao NPM do servidor.
 
-1. Um serviço que falha durante a **espera antes do failover** (2 min por defeito) passa para o TNAS: snapshot do espelho, `docker compose up` da cópia, verificação da cópia pelo NPM do TNAS e registo DNS.
+1. Um serviço que falha durante a **espera antes do failover** (2 min por defeito) passa para o TNAS: snapshot do espelho, as imagens em falta descarregadas, `docker compose up` da cópia, verificação da cópia pelo NPM do TNAS (a cada 5 s, até responder) e registo DNS. Cada passo fica com a hora e aparece na página enquanto acontece.
 2. Quando volta a responder no servidor durante a **estabilidade antes do regresso** (2 min), o agente repõe o DNS e remove a cópia e o snapshot.
 3. Com o router em baixo, o agente não decide nada. Com o NPM do servidor em baixo mas o servidor vivo, só avisa.
+4. Um failover que dá erro é tentado outra vez a cada `start_timeout_min` (10 min) enquanto o serviço não responder no servidor, em automático e fora de manutenção.
 
 Em **observação** só regista nos eventos o que faria. Em **automático** faz tudo sozinho.
 
@@ -33,9 +34,13 @@ docker compose pull && docker compose up -d
 - **Página principal:** a topologia (clientes, servidor, TNAS, internet), os serviços e os eventos.
 - **Forçar failover ou regresso:** arrasta um serviço do servidor para o TNAS, ou ao contrário, ou usa os botões no painel do serviço. Um failover forçado **fica no TNAS** até um regresso forçado; um automático volta sozinho.
 - **Manutenção** (global ou por serviço): bloqueia os failovers durante o tempo escolhido; os regressos continuam.
-- **Serviços:** **+** adiciona um à mão; Definições → Descobrir serviços lista as pastas do espelho ainda por proteger. A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.
+- **Serviços:** adicionam-se em Definições → Serviços, a partir das pastas do espelho ou à mão. A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.
+- **Versão:** ao lado do nome, no topo; leva à release no GitHub.
 - **Ícones:** o nome de um ícone do [dashboardicons.com](https://dashboardicons.com), ou o link da sua página. Vazio: o do nome ou da pasta.
-- **Avisos por email:** failover, regresso, erro, NPM do servidor em falha, router, certificado inválido e o agente a reiniciar. Os de uma mesma verificação seguem num só email. Um envio falhado tenta-se de novo durante um dia.
+- **Pronto para failover:** depois de cada verificação das imagens (no arranque, na descarga noturna e quando a stack de um serviço muda), o agente testa o token do Technitium, faz um snapshot de teste do espelho e vê as imagens e o que o TNAS precisa para cada compose (redes externas, portas livres). A caixa do TNAS diz "Pronto para failover" ou quantos problemas há; um problema novo vai por email.
+- **Espelho:** de hora a hora o agente vê se o backup do TOS continua a escrever no espelho (`btrfs subvolume find-new`: ficheiros com dados novos) e se há pastas novas ou composes mudados. Espelho parado há mais de `mirror_stale_days` (2 por defeito), pasta nova ou compose mudado: email; a pasta nova aparece na página até a protegeres ou dispensares.
+- **Avisos por email:** o servidor em baixo (com a hora), failover e regresso (o assunto diz quantos serviços, quando e quanto tempo ficaram no TNAS), erro, NPM do servidor em falha, router, certificado inválido, descarga noturna falhada, em observação o que o agente faria, e o agente a reiniciar. Os de uma mesma verificação seguem num só email. Um envio falhado tenta-se de novo durante um dia.
+- **Telemóvel:** no browser, "Adicionar ao ecrã inicial" instala a página. Para arrastar um serviço, segura-o meio segundo.
 - **Eventos:** 30 dias, com filtro, procura e exportação para CSV.
 
 ## Quando algo corre mal
@@ -48,7 +53,10 @@ docker compose pull && docker compose up -d
 | "O docker compose config não deu nenhum serviço" | O compose no espelho só tem `profiles`, só tem `include`, ou falta-lhe o `.env` |
 | O snapshot de teste falha | O espelho tem de ser um subvolume Btrfs no mesmo volume da pasta dos snapshots |
 | "Certificado de X inválido" | O serviço conta como a responder, sem failover (o TNAS serve o mesmo certificado). Renova o certificado no NPM |
-| Um serviço em ERROR | A cópia já foi removida. Sai sozinho quando o serviço voltar no servidor, ou com Forçar failover. A mensagem diz porquê (por exemplo, o IP da macvlan ocupado) |
+| Um serviço em ERROR | A cópia já foi removida. O agente tenta outra vez a cada 10 min enquanto o serviço não responder no servidor; entretanto podes corrigir o serviço (conta como estando em casa). A mensagem diz porquê (por exemplo, o IP da macvlan ocupado) |
+| "N problemas para um failover" | O painel do TNAS lista-os: token do Technitium, snapshot de teste, imagens em falta, uma rede externa que não existe no TNAS (`docker network create <rede>`), uma porta já ocupada |
+| "O espelho não muda desde…" | O backup do TOS parou: vê a tarefa de backup no TOS. Um failover arrancaria com os dados desse dia |
+| "Os dados de /x não estão no espelho" | O compose monta uma pasta fora do espelho, ou um volume com nome: no TNAS a cópia arranca sem esses dados. Muda o compose para uma pasta dentro da pasta do serviço |
 | "O agente reiniciou depois de parar sem ser pedido" | O watchdog viu a verificação parada ou a página sem responder, ou houve um crash. O email traz o último evento; `docker logs failover-agent` tem o resto |
 
 ## Ficheiros
@@ -76,4 +84,4 @@ make logs / stop
 
 O `e2e` e o `start` usam os mesmos containers: não corras os dois ao mesmo tempo. Só se testa no TNAS: o Btrfs a sério, o `arping` sobre o `ovs_eth0` e as macvlans.
 
-Uma tag `v*` corre o [release.yml](.github/workflows/release.yml): testes, imagem `ghcr.io/mordillosan/failover-agent` e binário na release.
+O merge de um PR de `dev/vX.Y.Z` para o `main` cria a tag `vX.Y.Z` e corre o [release.yml](.github/workflows/release.yml): testes, imagem `ghcr.io/mordillosan/failover-agent` e binário na release, com o texto do PR como notas. Uma tag `v*` enviada à mão faz o mesmo.

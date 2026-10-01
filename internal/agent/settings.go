@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -52,6 +51,7 @@ var settings = []setting{
 	locked(str("paths.snapshots_dir", "caminhos", func(c *Config) *string { return &c.Paths.SnapshotsDir })),
 	locked(str("paths.overrides_dir", "caminhos", func(c *Config) *string { return &c.Paths.OverridesDir })),
 	locked(str("npm.dir", "caminhos", func(c *Config) *string { return &c.NPM.Dir })),
+	num("paths.mirror_stale_days", "caminhos", func(c *Config) *int { return &c.Paths.MirrorStaleDays }),
 	str("email.host", "avisos", func(c *Config) *string { return &c.Email.Host }),
 	num("email.port", "avisos", func(c *Config) *int { return &c.Email.Port }),
 	str("email.security", "avisos", func(c *Config) *string { return &c.Email.Security }),
@@ -116,11 +116,18 @@ func fieldErr(w http.ResponseWriter, field, msg string) {
 // and addresses can change under nothing that is running.
 func (a *Agent) allHome() bool {
 	for _, sv := range a.cfg.Services {
-		if a.svc(sv.Name).State != Normal {
+		if !a.home(a.svc(sv.Name)) {
 			return false
 		}
 	}
 	return a.st.TNASNPM.Snapshot == ""
+}
+
+// home: nothing of the service runs on the TNAS. A failed failover (ERROR)
+// counts once its copy, snapshot and DNS record are gone, so its cause can be
+// fixed while the server is still down.
+func (a *Agent) home(s *SvcState) bool {
+	return s.State == Normal || s.State == Error && s.Snapshot == "" && !s.DNS
 }
 
 // postSection saves one section of the settings page: only its keys, all
@@ -260,15 +267,7 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		// a failover's first step, tried now: the mirror is a subvolume and the
 		// snapshots are on its volume (btrfs snapshots never cross volumes)
-		test := filepath.Join(c.Paths.SnapshotsDir, "failover-teste-"+time.Now().Format("20060102-150405"))
-		_ = os.Mkdir(c.Paths.SnapshotsDir, 0o755) // one level: under a parent that exists
-		err := a.sys.Run("btrfs", "subvolume", "snapshot", c.Paths.MirrorSubvol, test)
-		if err == nil {
-			err = a.sys.Run("btrfs", "subvolume", "delete", test)
-		} else {
-			err = fmt.Errorf("snapshot de teste do espelho falhou (tem de ser um subvolume btrfs, no mesmo volume da pasta dos snapshots): %w", err)
-		}
-		add("paths.snapshots_dir", err, "snapshot de teste do espelho feito e apagado")
+		add("paths.snapshots_dir", a.snapshotTest(c), "snapshot de teste do espelho feito e apagado")
 	}
 	writeJSON(w, http.StatusOK, out)
 }

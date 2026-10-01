@@ -4,7 +4,7 @@ services:
     image: ghcr.io/mordillosan/failover-agent:latest # built by .github/workflows/release.yml
     container_name: failover-agent
     restart: unless-stopped
-    stop_grace_period: 2m          # o agente acaba o tick em curso (compose up, btrfs) antes de sair
+    stop_grace_period: 12m         # o agente acaba o tick em curso antes de sair; um comando tem até 10 min
     network_mode: host             # router, .66, Technitium em localhost, arping
     privileged: true               # btrfs snapshot/delete e arping; testar se cap_add chega
     volumes:

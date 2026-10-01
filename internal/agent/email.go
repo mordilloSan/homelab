@@ -157,16 +157,25 @@ func message(m Mail) []byte {
 type alertItem struct {
 	T        time.Time
 	Svc, Msg string
+	OnTNAS   time.Duration // a return: how long the service was on the TNAS
 }
 
 // alert is an event someone should know about: it also goes by email, with
 // the others of the same check.
-func (a *Agent) alert(svc, msg string) {
+func (a *Agent) alert(svc, msg string) { a.alertFor(svc, msg, 0) }
+
+func (a *Agent) alertFor(svc, msg string, onTNAS time.Duration) {
 	a.event(svc, msg)
 	if a.cfg.Email.on() {
-		a.alerts = append(a.alerts, alertItem{a.now, svc, msg})
+		a.alerts = append(a.alerts, alertItem{a.now, svc, msg, onTNAS})
 	}
 }
+
+// The alerts an email's subject tells as one story.
+const (
+	msgFailover = "em failover no TNAS"
+	msgBack     = "de volta ao servidor"
+)
 
 const mailKeep = 24 * time.Hour
 
@@ -196,15 +205,68 @@ func (a *Agent) flushAlerts() {
 	})
 }
 
+// alertSubject tells the incident: how many services went to the TNAS and
+// when, or came back and after how long; any other alerts are counted after.
 func alertSubject(batch []alertItem) string {
-	first := batch[0].Msg
-	if batch[0].Svc != "" {
-		first = batch[0].Svc + ": " + first
+	var fo, back []alertItem
+	for _, x := range batch {
+		switch {
+		case strings.HasPrefix(x.Msg, msgFailover):
+			fo = append(fo, x)
+		case strings.HasPrefix(x.Msg, msgBack):
+			back = append(back, x)
+		}
 	}
-	if len(batch) == 1 {
-		return "[Failover] " + first
+	who := func(g []alertItem) string {
+		if len(g) == 1 {
+			return g[0].Svc
+		}
+		return fmt.Sprintf("%d serviços", len(g))
 	}
-	return fmt.Sprintf("[Failover] %d avisos: %s…", len(batch), first)
+	var subject string
+	var told int
+	switch {
+	case fo != nil:
+		subject, told = who(fo)+" "+msgFailover+" às "+fo[0].T.Format("15:04"), len(fo)
+	case back != nil:
+		longest := slices.MaxFunc(back, func(x, y alertItem) int { return cmp.Compare(x.OnTNAS, y.OnTNAS) }).OnTNAS
+		subject, told = who(back)+" "+msgBack, len(back)
+		if longest > 0 {
+			subject += " após " + fmtDur(longest) + " no TNAS"
+		}
+	default:
+		subject, told = batch[0].Msg, 1
+		if batch[0].Svc != "" {
+			subject = batch[0].Svc + ": " + subject
+		}
+	}
+	if rest := len(batch) - told; rest > 0 {
+		subject += fmt.Sprintf(" (+%d %s)", rest, map[bool]string{true: "aviso", false: "avisos"}[rest == 1])
+	}
+	return "[Failover] " + subject
+}
+
+// fmtDur is a duration as people say it: 45 min, 6 h 2 min, 2 dias 3 h.
+func fmtDur(d time.Duration) string {
+	m := int(d.Round(time.Minute).Minutes())
+	switch {
+	case m < 1:
+		return "menos de 1 min"
+	case m < 60:
+		return fmt.Sprintf("%d min", m)
+	case m < 24*60:
+		if m%60 == 0 {
+			return fmt.Sprintf("%d h", m/60)
+		}
+		return fmt.Sprintf("%d h %d min", m/60, m%60)
+	default:
+		days, h := m/(24*60), m%(24*60)/60
+		s := fmt.Sprintf("%d %s", days, map[bool]string{true: "dia", false: "dias"}[days == 1])
+		if h > 0 {
+			s += fmt.Sprintf(" %d h", h)
+		}
+		return s
+	}
 }
 
 func (a *Agent) alertBody(batch []alertItem) string {
@@ -223,7 +285,7 @@ func (a *Agent) alertBody(batch []alertItem) string {
 // says what the server answered.
 func (a *Agent) postEmailTest(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
-	e, body := a.cfg.Email, a.alertBody([]alertItem{{time.Now(), "", "email de teste: os avisos do failover chegam aqui"}})
+	e, body := a.cfg.Email, a.alertBody([]alertItem{{T: time.Now(), Msg: "email de teste: os avisos do failover chegam aqui"}})
 	a.mu.Unlock()
 	if !e.on() {
 		http.Error(w, "falta o servidor ou a quem enviar", http.StatusBadRequest)
