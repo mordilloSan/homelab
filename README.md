@@ -1,6 +1,6 @@
 # failover-agent
 
-Corre no TNAS e vigia os serviços do servidor (`.66`). Quando um falha, arranca uma cópia no TNAS a partir de um snapshot Btrfs do espelho e aponta o nome do serviço para o TNAS no Technitium. Quando o servidor volta, repõe o DNS e apaga a cópia. **O que se escreveu na cópia perde-se.**
+Corre no TNAS e vigia os serviços do servidor (`.66`). Quando um falha, arranca uma cópia no TNAS a partir de um snapshot do espelho (uma cópia Btrfs com reflink: segundos, quase sem espaço) e aponta o nome do serviço para o TNAS no Technitium. Quando o servidor volta, repõe o DNS e apaga a cópia. **O que se escreveu na cópia perde-se.**
 
 ## Como funciona
 
@@ -51,7 +51,8 @@ docker compose pull && docker compose up -d
 | Gmail: `535 Username and Password not accepted` | Usa uma [password de aplicação](https://myaccount.google.com/apppasswords) (precisa da verificação em 2 passos), não a password da conta |
 | Um serviço "sem endereço" na descoberta | O proxy host do NPM tem de apontar para o nome ou hostname do contentor, para o IP fixo de uma macvlan, ou para o IP do servidor numa porta que o compose publica |
 | "O docker compose config não deu nenhum serviço" | O compose no espelho só tem `profiles`, só tem `include`, ou falta-lhe o `.env` |
-| O snapshot de teste falha | O espelho tem de ser um subvolume Btrfs no mesmo volume da pasta dos snapshots |
+| O snapshot de teste falha | A pasta dos snapshots tem de estar no mesmo volume Btrfs do espelho (a cópia é com reflink) |
+| Na cópia, um serviço não abre as próprias pastas (`Permission denied`, como a postgres ou o rabbitmq do unifi) | A pasta dos snapshots está numa partilha do TOS, que só deixa entrar o root e o dono de cada pasta. Muda `snapshots_dir` no `failover.yml` para fora das partilhas, por exemplo `/Volume1/@failover-snapshots` |
 | "Certificado de X inválido" | O serviço conta como a responder, sem failover (o TNAS serve o mesmo certificado). Renova o certificado no NPM |
 | Um serviço em ERROR | A cópia já foi removida. O agente tenta outra vez a cada 10 min enquanto o serviço não responder no servidor; entretanto podes corrigir o serviço (conta como estando em casa). A mensagem diz porquê (por exemplo, o IP da macvlan ocupado) |
 | "N problemas para um failover" | O painel do TNAS lista-os: token do Technitium, snapshot de teste, imagens em falta, uma rede externa que não existe no TNAS (`docker network create <rede>`), uma porta já ocupada |

@@ -99,8 +99,15 @@ func TestSectionCheck(t *testing.T) {
 	}) {
 		t.Fatalf("o snapshot de teste não foi apagado: %v", f.cmds)
 	}
+	f.failCmd = []string{"cp "}
+	if r := check(); r["snap"].OK || !strings.Contains(r["snap"].Msg, "reflink") {
+		t.Fatalf("a cópia com reflink falhou e o teste passou: %+v", r)
+	}
+	if left, _ := filepath.Glob(a.cfg.Paths.SnapshotsDir + "/failover-teste-*"); len(left) > 0 {
+		t.Fatalf("o subvolume da cópia falhada ficou: %v", left)
+	}
 	a.cfg.Paths.SnapshotsDir = filepath.Join(t.TempDir(), "nao", "existe")
-	f.failCmd = []string{"btrfs subvolume snapshot"}
+	f.failCmd = []string{"btrfs subvolume create"}
 	if r := check(); r["paths.snapshots_dir"].OK || r["snap"].OK || !strings.Contains(r["snap"].Msg, "subvolume") {
 		t.Fatalf("sem pasta-mãe e sem snapshot: %+v", r)
 	}

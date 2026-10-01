@@ -266,7 +266,7 @@ func (a *Agent) postCheck(w http.ResponseWriter, r *http.Request) {
 			made("paths.overrides_dir", c.Paths.OverridesDir)
 		}
 		// a failover's first step, tried now: the mirror is a subvolume and the
-		// snapshots are on its volume (btrfs snapshots never cross volumes)
+		// snapshots are on its volume (reflinks never cross volumes)
 		add("paths.snapshots_dir", a.snapshotTest(c), "snapshot de teste do espelho feito e apagado")
 	}
 	writeJSON(w, http.StatusOK, out)

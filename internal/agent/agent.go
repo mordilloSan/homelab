@@ -394,6 +394,7 @@ type Agent struct {
 	rescan     atomic.Bool // asked for while a scan ran
 	beats      map[string][]Beat
 	tnasSeen   bool // last TNAS ping, so a change is logged once
+	routerMs   int  // the router's last ping, for the UI
 	userPath   string
 	creds      atomic.Pointer[creds] // read by every request, so outside mu; nil: no account yet
 	started    time.Time             // the account can be made in the first 30 minutes after it
@@ -590,6 +591,7 @@ func (a *Agent) inMaint(s *SvcState) bool {
 // with the server down it spends seconds on timeouts.
 type probe struct {
 	routerOK, npmOK, serverPing, tnasNPMOK bool
+	routerMs                               int
 	tnasNet, serverNet                     bool // each Technitium reaches the internet
 	tnasDNS, serverDNS                     bool // each Technitium answers
 	tnasPing                               bool // its own LAN IP is up (answered locally)
@@ -605,7 +607,10 @@ func (a *Agent) probe() probe {
 	tnasNPM := a.st.TNASNPM.Snapshot != ""
 	a.mu.Unlock()
 
-	p := probe{routerOK: a.ping(c.RouterIP), tnasPing: a.ping(c.TNASIP), svcOK: map[string]bool{}, svcMs: map[string]int{}, certs: map[string]string{}}
+	t0 := time.Now()
+	routerOK := a.ping(c.RouterIP)
+	// ponytail: wall time of the ping process, a ms or two over the real round trip
+	p := probe{routerOK: routerOK, routerMs: int(time.Since(t0).Milliseconds()), tnasPing: a.ping(c.TNASIP), svcOK: map[string]bool{}, svcMs: map[string]int{}, certs: map[string]string{}}
 	var certMu sync.Mutex
 	check := func(host, ip string) bool {
 		bad, err := certOK(a.sys.Check(host, ip))
@@ -721,6 +726,7 @@ func (a *Agent) evaluate(p probe) {
 		a.tnasSeen = p.tnasPing
 		a.event("", map[bool]string{true: "o TNAS responde no IP da LAN", false: "o TNAS não responde no próprio IP da LAN"}[p.tnasPing])
 	}
+	a.routerMs = p.routerMs
 	if p.routerOK != st.RouterOK {
 		st.RouterOK = p.routerOK
 		a.alert("", map[bool]string{true: "router acessível", false: "router inacessível: sem ações"}[p.routerOK])
@@ -1186,10 +1192,28 @@ func (a *Agent) snapshot(name string) (string, error) {
 	p := a.cfg.Paths
 	dst := filepath.Join(p.SnapshotsDir, "failover-"+name+"-"+a.now.Format("20060102-150405"))
 	_ = os.MkdirAll(p.SnapshotsDir, 0o755) // if this fails, btrfs says so
-	if err := a.sys.Run("btrfs", "subvolume", "snapshot", p.MirrorSubvol, dst); err != nil {
+	if err := a.copyMirror(p.MirrorSubvol, dst); err != nil {
 		return "", err
 	}
 	return dst, nil
+}
+
+// copyMirror makes a copy's "snapshot": a new subvolume with the mirror
+// reflinked into it, not a btrfs snapshot. TOS keeps its share permissions
+// with the files (the + in ls -l), so a snapshot carries them, and with them
+// only root and each folder's owner get in: a container's own users (postgres,
+// rabbitmq...) are refused through parents they do not own. A reflink copy
+// shares the data blocks (seconds, almost no space) and leaves them behind,
+// as long as snapshots_dir is outside the shares, where new files get them too.
+func (a *Agent) copyMirror(src, dst string) error {
+	if err := a.sys.Run("btrfs", "subvolume", "create", dst); err != nil {
+		return err
+	}
+	if err := a.sys.Run("cp", "-dR", "--reflink=always", "--preserve=mode,ownership,timestamps", src+"/.", dst); err != nil {
+		_ = a.sys.Run("btrfs", "subvolume", "delete", dst)
+		return fmt.Errorf("cópia do espelho com reflink falhou: %w", err)
+	}
+	return nil
 }
 
 // down removes a compose project's containers and named volumes (O3), then
@@ -1545,6 +1569,7 @@ func (a *Agent) publish() {
 		TNASIP           string    `json:"tnas_ip"`
 		RouterIP         string    `json:"router_ip"`
 		RouterOK         bool      `json:"router_ok"`
+		RouterMs         int       `json:"router_ms"`
 		TNASNetOK        bool      `json:"tnas_net_ok"`
 		ServerNetOK      bool      `json:"server_net_ok"`
 		TNASDNSOK        bool      `json:"tnas_dns_ok"`
@@ -1576,7 +1601,7 @@ func (a *Agent) publish() {
 		Verdict          Verdict   `json:"verdict"`
 	}{
 		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
-		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
+		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.routerMs, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},

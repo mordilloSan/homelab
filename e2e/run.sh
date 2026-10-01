@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end test of the agent image against the local Docker.
 # The "server" and the TNAS NPM are Caddy containers on bridge networks;
-# btrfs is replaced by cp/rm (no btrfs here); a Caddy stands in for the
+# btrfs is replaced by mkdir/rm and cp loses its --reflink (no btrfs here); a Caddy stands in for the
 # Technitium API and Mailpit takes the alert emails.
 # Covers T-04/T-05/T-06/T-11/T-12/T-19/T-20/T-21 minus btrfs. Takes ~3 min.
 #
@@ -164,14 +164,23 @@ if [[ $cmd == start ]]; then
 fi
 cat >"$W/btrfs" <<'EOF'
 #!/bin/sh
-# stand-in for: btrfs subvolume snapshot SRC DST | btrfs subvolume delete PATH
+# stand-in for: btrfs subvolume create DST | btrfs subvolume delete PATH
 case "$2" in
-snapshot) exec cp -a "$3" "$4" ;;
+create) exec mkdir "$3" ;;
 delete) exec rm -rf "$3" ;;
 esac
 exit 1
 EOF
-chmod +x "$W/btrfs"
+cat >"$W/cp" <<'EOF'
+#!/bin/sh
+# stand-in for GNU cp --reflink=always (no btrfs here): the same copy, without the reflink
+for a; do
+	shift
+	[ "$a" = --reflink=always ] || set -- "$@" "$a"
+done
+exec /bin/cp "$@"
+EOF
+chmod +x "$W/btrfs" "$W/cp"
 
 echo e2e-token >"$W/config/technitium.token"
 cat >"$W/config/failover.yml" <<EOF
@@ -194,7 +203,7 @@ EOF
 run_agent() {
 	docker run -d --name e2e-agent --network host --privileged --restart unless-stopped \
 		-v /var/run/docker.sock:/var/run/docker.sock -v "$W:$W" \
-		-v "$W/btrfs:/usr/local/bin/btrfs:ro" -e TZ=Europe/Lisbon \
+		-v "$W/btrfs:/usr/local/bin/btrfs:ro" -v "$W/cp:/usr/local/bin/cp:ro" -e TZ=Europe/Lisbon \
 		"$image" -config "$W/config/failover.yml" -state "$W/state/state.json" >/dev/null
 }
 if [[ $cmd == test ]]; then

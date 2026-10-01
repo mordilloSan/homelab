@@ -209,10 +209,10 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .banner .icon { color: var(--c); margin-top: 1px; }
 
 /* the topology: where every service is running right now */
-/* left to right, as a request goes: the clients, then the DNS, the internet and
-   the router, then the server over the TNAS, the agent's checks between them */
+/* left to right, as a request goes: the clients, then the DNS (the internet over
+   it, the router under it), then the server over the TNAS, the agent's checks between them */
 .topo { position: relative; display: grid; grid-template-columns: auto minmax(170px, auto) minmax(0, 1fr);
-  grid-template-areas: "clients dns server" "clients internet lane" "clients router tnas"; column-gap: 56px; align-items: center;
+  grid-template-areas: "clients internet server" "clients dns lane" "clients router tnas"; column-gap: 56px; align-items: center;
   padding-block: 40px; }
 #nodeServer { grid-area: server; } #nodeTnas { grid-area: tnas; } #lane { grid-area: lane; }
 #dns { grid-area: dns; } #internet { grid-area: internet; } #routerNode { grid-area: router; }
@@ -244,7 +244,6 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .wire.on { stroke: color-mix(in srgb, var(--wc), transparent 50%); stroke-dasharray: 6 8; animation: wire 1s linear infinite; }
 @keyframes wire { to { stroke-dashoffset: -14; } }
 .pkt { fill: var(--wc); filter: drop-shadow(0 0 4px var(--wc)); }
-.wire.cluster { stroke: color-mix(in srgb, var(--wc), transparent 40%); stroke-dasharray: 3 5; }
 .node, .lane { position: relative; z-index: 1; }
 .probe { position: absolute; left: 50%; top: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--pc);
   box-shadow: 0 0 12px 3px color-mix(in srgb, var(--pc), transparent 40%); pointer-events: none; }
@@ -479,7 +478,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   .lower { grid-template-columns: minmax(0, 1fr); }
   .ev-card .timeline { max-height: 60vh; }
   /* one column: the clients, the three hops side by side, then the server over the TNAS */
-  .topo { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "clients clients clients" "dns internet router"
+  .topo { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "clients clients clients" "internet dns router"
     "server server server" "lane lane lane" "tnas tnas tnas"; column-gap: 6px; row-gap: 0; }
   .wires { display: none; }
   .clients { margin-bottom: 14px; }
@@ -904,7 +903,7 @@ function renderTopology() {
     <small>${dm.map(x => `<i class="m ${x.s}"></i>.${esc(x.ip.split('.').pop())}`).join('')}</small></span>`);
   $('dns').title = `O Technitium em cluster: ${dm.map(x => `${x.who} (${x.ip}) ${{up: 'responde', down: 'não responde', unknown: 'por verificar'}[x.s]}`).join(', ')}`;
   paint('routerNode', `<span class="node-icon st st-${st.router_ok ? 'up' : 'down'}">${icon('router')}</span><span><strong>Router</strong>
-    <small><span class="mono">${esc(st.router_ip)}</span><span class="sm-hide"> · ${st.router_ok ? 'acessível' : 'inacessível'}</span></small></span>`);
+    <small><span class="mono">${esc(st.router_ip)}</span><span class="sm-hide"> · ${st.router_ok ? `${st.router_ms} ms` : 'sem resposta'}</span></small></span>`);
   renderHud();
   fillBeats();
   renderWires();
@@ -955,9 +954,9 @@ function renderHud() {
   set('.hud-br', `Espelho ${v(st.mirror_changed ? ago(st.mirror_changed) : '—')}\nImagens ${v(img.known ? `${img.present}/${img.total}` : '—')}`);
 }
 
-// The wires from the clients: requests go wherever the DNS sends them, the
-// server unless a service's A record points at the TNAS. Packets travel along
-// the wires that carry traffic.
+// Every wire goes through the DNS: the clients ask it, it sends them to the
+// server unless a service's A record points at the TNAS; above it the internet,
+// under it the router. Packets travel along the wires that carry traffic.
 function renderWires() {
   if ($('page-overview').hidden) return;
   const svg = $('wires'), topo = $('topo');
@@ -967,9 +966,9 @@ function renderWires() {
   const c = r('clients'), s = r('nodeServer'), t = r('nodeTnas');
   const n = r('internet'), dn = r('dns'), ro = r('routerNode');
   const right = b => ({x: b.x + b.w, y: b.y + b.h / 2}), left = (b, f = .5) => ({x: b.x, y: b.y + b.h * f});
-  // across: a curve leaving and arriving level; down: a straight line
+  // across: a curve leaving and arriving level; up or down: a straight line from a to b
   const d = (f, to) => { const k = (to.x - f.x) * .5; return `M ${f.x} ${f.y} C ${f.x + k} ${f.y}, ${to.x - k} ${to.y}, ${to.x} ${to.y}`; };
-  const down = (a, b) => `M ${a.x + a.w / 2} ${a.y + a.h} L ${b.x + b.w / 2} ${b.y}`;
+  const vert = (a, b) => a.y < b.y ? `M ${a.x + a.w / 2} ${a.y + a.h} L ${b.x + b.w / 2} ${b.y}` : `M ${a.x + a.w / 2} ${a.y} L ${b.x + b.w / 2} ${b.y + b.h}`;
   const viaTnas = st.services.filter(x => x.dns).length, viaServer = st.services.length - viaTnas;
   const wire = (id, path, color, n) => {
     const on = n > 0;
@@ -979,15 +978,12 @@ function renderWires() {
   };
   const nets = Object.values(netState()), net = nets.includes('up') ? 'up' : nets.includes('down') ? 'down' : 'unknown';
   const tone = x => x === 'up' ? 'var(--success)' : x === 'down' ? 'var(--error)' : 'var(--neutral)';
-  // the cluster: a dashed line from the DNS to each member, the colour its answer
-  const member = (id, to, x) => `<g style="--wc:${tone(x)}"><path id="${id}" class="wire cluster" d="${d(right(dn), left(to, .18))}"/></g>`;
-  const [ms, mt] = dnsMembers();
-  const html = wire('wire-lan', d(right(c), left(ro)), 'var(--success)', st.router_ok ? st.services.length : 0)
-    + wire('wire-server', d(right(ro), left(s)), st.server_npm_ok ? 'var(--success)' : 'var(--error)', viaServer)
-    + wire('wire-tnas', d(right(ro), left(t)), 'var(--info)', viaTnas)
-    + wire('wire-dns-net', down(dn, n), tone(net), net === 'unknown' ? 0 : 1)
-    + wire('wire-router-net', down(n, ro), tone(st.router_ok ? 'up' : 'down'), 1)
-    + member('wire-dns-server', s, ms.s) + member('wire-dns-tnas', t, mt.s);
+  const dm = dnsMembers(), dnsUp = dm.some(x => x.s === 'up');
+  const html = wire('wire-lan', d(right(c), left(dn)), tone(dnsUp ? 'up' : 'down'), dnsUp ? st.services.length : 0)
+    + wire('wire-server', d(right(dn), left(s)), st.server_npm_ok ? 'var(--success)' : 'var(--error)', viaServer)
+    + wire('wire-tnas', d(right(dn), left(t)), 'var(--info)', viaTnas)
+    + wire('wire-dns-net', vert(dn, n), tone(net), net === 'unknown' ? 0 : 1)
+    + wire('wire-dns-router', vert(dn, ro), tone(st.router_ok ? 'up' : 'down'), 1);
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
   if (svg.__html !== html) { svg.__html = html; svg.innerHTML = html; }
 }

@@ -130,13 +130,13 @@ func sortedKeys(m map[string]int64) []string {
 	return keys
 }
 
-// snapshotTest is a failover's first step, tried: the mirror is a btrfs
-// subvolume and the snapshots folder is on its volume.
+// snapshotTest is a failover's first step, tried: the snapshots folder is a
+// btrfs volume, the mirror's, so a reflink copy of it works.
 func (a *Agent) snapshotTest(c Config) error {
 	test := filepath.Join(c.Paths.SnapshotsDir, "failover-teste-"+time.Now().Format("20060102-150405"))
 	_ = os.Mkdir(c.Paths.SnapshotsDir, 0o755) // one level: under a parent that exists
-	if err := a.sys.Run("btrfs", "subvolume", "snapshot", c.Paths.MirrorSubvol, test); err != nil {
-		return fmt.Errorf("snapshot de teste do espelho falhou (tem de ser um subvolume btrfs, no mesmo volume da pasta dos snapshots): %w", err)
+	if err := a.copyMirror(c.Paths.MirrorSubvol, test); err != nil {
+		return fmt.Errorf("snapshot de teste do espelho falhou (a pasta dos snapshots tem de estar num subvolume btrfs, no mesmo volume do espelho): %w", err)
 	}
 	return a.sys.Run("btrfs", "subvolume", "delete", test)
 }
