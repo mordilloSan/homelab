@@ -32,7 +32,7 @@ func TestServiceIconLink(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(a.iconDir(), "nextcloud")); err != nil || string(b) != string(pngIcon) {
 		t.Fatalf("ícone guardado: %v %q", err, b)
 	}
-	if v := string(*a.view.Load()); !strings.Contains(v, `"icon_v":"`) {
+	if v := string(a.view.Load().raw); !strings.Contains(v, `"icon_v":"`) {
 		t.Fatal("o estado não diz que há ícone")
 	}
 	w := httptest.NewRecorder()

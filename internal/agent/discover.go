@@ -168,16 +168,27 @@ func parseProxyHost(b []byte) proxyHost {
 
 // composeInfo is what matters of a resolved compose for a failover.
 type composeInfo struct {
-	Names    map[string]bool   // service keys, container names and hostnames, as a proxy host may name them
-	strong   map[string]bool   // the container names and hostnames alone: a bare key (app, web) may be in any compose
-	keyOf    map[string]string // any of Names → its service key
-	Ports    map[int]string    // published port → service key
-	FixedIPs map[string]string // fixed IP on a macvlan → service key
-	FreeIP   string            // the IP a copy must find free (a macvlan's)
-	Notes    []string
-	lan      string
-	macvlans []string // networks to move to the TNAS's LAN interface
-	heavy    []string // services with a GPU or devices
+	Names     map[string]bool   // service keys, container names and hostnames, as a proxy host may name them
+	strong    map[string]bool   // the container names and hostnames alone: a bare key (app, web) may be in any compose
+	keyOf     map[string]string // any of Names → its service key
+	Ports     map[int]string    // published port → service key
+	FixedIPs  map[string]string // fixed IP on a macvlan → service key
+	FreeIP    string            // the IP a copy must find free (a macvlan's)
+	Notes     []string
+	lan       string
+	macvlans  []string // networks to move to the TNAS's LAN interface
+	heavy     []string // services with a GPU or devices
+	Images    []string // the image of every service, sorted, once each (built ones by compose's name)
+	External  []string // external networks: they must exist on the TNAS
+	Published []pubPort
+	Binds     []string // absolute sources of bind mounts
+	Named     []string // named volumes: they start empty on the TNAS and go on the return
+}
+
+// pubPort is a port a service publishes on its host.
+type pubPort struct {
+	HostIP, Proto string
+	Port          int
 }
 
 // analyzeCompose reads `docker compose config --format json`. lanIface is the
@@ -187,7 +198,9 @@ func analyzeCompose(js []byte, lanIface string) (composeInfo, error) {
 		Name     string                    `json:"name"`
 		Services map[string]composeService `json:"services"`
 		Networks map[string]struct {
-			Driver string `json:"driver"`
+			Name     string `json:"name"`
+			Driver   string `json:"driver"`
+			External bool   `json:"external"`
 		} `json:"networks"`
 	}
 	if err := json.Unmarshal(js, &c); err != nil {
@@ -198,8 +211,12 @@ func analyzeCompose(js []byte, lanIface string) (composeInfo, error) {
 		if net.Driver == "macvlan" || net.Driver == "ipvlan" {
 			info.macvlans = append(info.macvlans, n)
 		}
+		if net.External {
+			info.External = append(info.External, cmp.Or(net.Name, n))
+		}
 	}
 	slices.Sort(info.macvlans)
+	slices.Sort(info.External)
 	keys := make([]string, 0, len(c.Services))
 	for k := range c.Services {
 		keys = append(keys, k)
@@ -208,6 +225,10 @@ func analyzeCompose(js []byte, lanIface string) (composeInfo, error) {
 	for _, k := range keys {
 		info.addService(c.Name, k, c.Services[k])
 	}
+	slices.Sort(info.Images)
+	info.Images = slices.Compact(info.Images)
+	slices.Sort(info.Binds)
+	info.Binds = slices.Compact(info.Binds)
 	info.overrideFor(nil) // the notes
 	return info, nil
 }
@@ -215,10 +236,17 @@ func analyzeCompose(js []byte, lanIface string) (composeInfo, error) {
 // composeService is what analyzeCompose reads of one service.
 type composeService struct {
 	ContainerName string `json:"container_name"`
+	Image         string `json:"image"`
 	Hostname      string `json:"hostname"` // an NPM may point to it: it is as specific as the container name
 	Ports         []struct {
-		Published any `json:"published"`
+		Published any    `json:"published"`
+		HostIP    string `json:"host_ip"`
+		Protocol  string `json:"protocol"`
 	} `json:"ports"`
+	Volumes []struct {
+		Type   string `json:"type"`
+		Source string `json:"source"`
+	} `json:"volumes"`
 	Networks map[string]*struct {
 		IPv4 string `json:"ipv4_address"`
 	} `json:"networks"`
@@ -255,11 +283,8 @@ func (info *composeInfo) addService(project, k string, s composeService) {
 			info.Names[n], info.strong[n], info.keyOf[n] = true, true, k
 		}
 	}
-	for _, p := range s.Ports {
-		if port, err := strconv.Atoi(fmt.Sprint(p.Published)); err == nil && port > 0 {
-			info.Ports[port] = k
-		}
-	}
+	info.Images = append(info.Images, cmp.Or(s.Image, project+"-"+k)) // a built image is named <project>-<service>
+	info.addPortsAndMounts(k, s)
 	for n, sn := range s.Networks {
 		if sn != nil && sn.IPv4 != "" && slices.Contains(info.macvlans, n) {
 			info.FixedIPs[sn.IPv4] = k
@@ -273,6 +298,24 @@ func (info *composeInfo) addService(project, k string, s composeService) {
 	}
 	if s.NetworkMode == "host" {
 		info.Notes = append(info.Notes, k+" usa a rede do anfitrião: no TNAS fica com as portas do TNAS")
+	}
+}
+
+// addPortsAndMounts reads what service k publishes on its host and mounts.
+func (info *composeInfo) addPortsAndMounts(k string, s composeService) {
+	for _, p := range s.Ports {
+		if port, err := strconv.Atoi(fmt.Sprint(p.Published)); err == nil && port > 0 {
+			info.Ports[port] = k
+			info.Published = append(info.Published, pubPort{p.HostIP, cmp.Or(p.Protocol, "tcp"), port})
+		}
+	}
+	for _, v := range s.Volumes {
+		switch {
+		case v.Type == "bind" && filepath.IsAbs(v.Source):
+			info.Binds = append(info.Binds, v.Source)
+		case v.Type == "volume" && v.Source != "":
+			info.Named = append(info.Named, v.Source)
+		}
 	}
 }
 
@@ -304,6 +347,34 @@ func (c *composeInfo) overrideFor(served []string) string {
 		}
 	}
 	return b.String()
+}
+
+// dataNotes says where a copy's data would not come from the mirror: a bind
+// of a folder outside it is the TNAS's own folder there (empty, or another
+// one), and a named volume starts empty on the TNAS and goes on the return.
+func dataNotes(info composeInfo, mirror string) []string {
+	var notes []string
+	for _, b := range info.Binds {
+		if systemPath(b) || b == mirror || strings.HasPrefix(b, strings.TrimSuffix(mirror, "/")+"/") {
+			continue
+		}
+		notes = append(notes, "os dados de "+b+" não estão no espelho: no TNAS a cópia usa a pasta "+b+" do TNAS (vazia ou outra)")
+	}
+	for _, v := range info.Named {
+		notes = append(notes, "o volume "+v+" não está no espelho: no TNAS nasce vazio e perde-se no regresso")
+	}
+	return notes
+}
+
+// systemPath is a bind of the host itself (the docker socket, the clock,
+// devices), the same on the TNAS: never data.
+func systemPath(p string) bool {
+	for _, s := range []string{"/var/run/", "/run/", "/dev", "/proc", "/sys", "/etc/localtime", "/etc/timezone", "/lib/modules", "/usr/share/zoneinfo"} {
+		if strings.HasPrefix(p, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // assignment is the proxy hosts found for one compose.
@@ -459,6 +530,10 @@ func (a *Agent) resolveCompose(root, dir, lan string) (composeInfo, error) {
 func (a *Agent) discover() discovery {
 	a.mu.Lock()
 	c := a.cfg
+	running := map[string]bool{} // a running copy holds its own ports
+	for _, sv := range c.Services {
+		running[sv.Name] = !a.home(a.svc(sv.Name))
+	}
 	a.mu.Unlock()
 	var d discovery
 	route, _ := os.ReadFile(a.procRoute)
@@ -521,7 +596,7 @@ func (a *Agent) discover() discovery {
 		}
 		s.Host, s.Hosts = as.host, as.all
 		s.OverrideYAML, s.RequireFreeIP = info.overrideFor(as.keys), info.FreeIP
-		s.Notes = slices.Concat(info.Notes, as.notes)
+		s.Notes = slices.Concat(info.Notes, as.notes, dataNotes(info, c.Paths.MirrorSubvol), a.tnasNotes(info, running[s.Name]))
 		if s.Host == "" && len(hosts) > 0 {
 			s.Notes = append(s.Notes, "nenhum proxy host do NPM aponta para este compose")
 		}

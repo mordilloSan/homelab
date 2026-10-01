@@ -55,6 +55,8 @@ type Config struct {
 		MirrorRoot   string `yaml:"mirror_root"`
 		SnapshotsDir string `yaml:"snapshots_dir"`
 		OverridesDir string `yaml:"overrides_dir"`
+		// the mirror unchanged for this many days: the TOS backup stopped (0: 2)
+		MirrorStaleDays int `yaml:"mirror_stale_days,omitempty"`
 	} `yaml:"paths"`
 	NPM struct {
 		Dir           string `yaml:"dir"`
@@ -130,6 +132,7 @@ func (c *Config) validate() error {
 		{!filepath.IsAbs(c.Paths.MirrorSubvol), "paths.mirror_subvol", "tem de ser um caminho absoluto"},
 		{c.Paths.MirrorRoot != "" && c.Paths.MirrorRoot != "." && !isRel(c.Paths.MirrorRoot), "paths.mirror_root", "tem de ser uma pasta dentro do espelho"},
 		{!filepath.IsAbs(c.Paths.SnapshotsDir), "paths.snapshots_dir", "tem de ser um caminho absoluto"},
+		{c.Paths.MirrorStaleDays < 0, "paths.mirror_stale_days", "não pode ser negativo"},
 		{c.Paths.OverridesDir != "" && !filepath.IsAbs(c.Paths.OverridesDir), "paths.overrides_dir", "tem de ser um caminho absoluto"},
 		{!isRel(c.NPM.Dir), "npm.dir", "tem de ser uma pasta dentro do espelho"},
 		{!isURL(c.DNS.APIURL), "dns.api_url", "tem de começar por http:// ou https://"},
@@ -221,14 +224,31 @@ func saveConfig(path string, c *Config) error {
 	return writeAtomic(path, buf.Bytes())
 }
 
+// writeAtomic writes path through a temporary file that is fsynced before
+// the rename, and the folder after it, so a power cut leaves the old file or
+// the new one, never an empty one (as LinuxIO's utils.WriteFileAtomic).
 func writeAtomic(path string, b []byte) error {
 	tmp := path + ".tmp"
-	_ = os.Remove(tmp) // WriteFile keeps the mode of a leftover one
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	_ = os.Remove(tmp) // a leftover one would keep its mode
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	err = cmp.Or(err, f.Sync(), f.Close())
+	if err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	chownLikeDir(tmp)
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 const (
@@ -250,7 +270,36 @@ type SvcState struct {
 	Msg        string    `json:"msg,omitempty"`
 	MaintUntil time.Time `json:"maint_until,omitzero"`
 	Observed   bool      `json:"observed,omitempty"`
-	Forced     bool      `json:"forced,omitempty"` // a forced failover: stays on the TNAS until a forced return
+	Forced     bool      `json:"forced,omitempty"`   // a forced failover: stays on the TNAS until a forced return
+	OnTNAS     time.Time `json:"on_tnas,omitzero"`   // since when the copy serves (ACTIVE), kept until it is back
+	LastErr    string    `json:"last_err,omitempty"` // the last failover error: a retry that fails the same way is not emailed again
+	Steps      []Step    `json:"steps,omitempty"`    // the last failover's steps, for the page and the email; kept until it is back
+}
+
+// Step is one step of a failover, done at At.
+type Step struct {
+	Name string    `json:"name"`
+	At   time.Time `json:"at"`
+}
+
+// markStep records that the failover finished name now, and shows it at once.
+func (a *Agent) markStep(s *SvcState, name string) {
+	s.Steps = append(s.Steps, Step{name, time.Now()})
+	a.publish()
+}
+
+// stepTimes is how long each step took: "snapshot 2 s, arranque 34 s".
+func stepTimes(steps []Step) string {
+	var parts []string
+	for i := 1; i < len(steps); i++ {
+		sec := int(steps[i].At.Sub(steps[i-1].At).Round(time.Second).Seconds())
+		d := fmt.Sprintf("%d s", sec)
+		if sec >= 60 {
+			d = fmt.Sprintf("%d min %d s", sec/60, sec%60)
+		}
+		parts = append(parts, steps[i].Name+" "+d)
+	}
+	return strings.Join(parts, ", ")
 }
 
 type Event struct {
@@ -260,18 +309,28 @@ type Event struct {
 }
 
 type State struct {
-	RouterOK     bool      `json:"router_ok"`
-	TNASNetOK    bool      `json:"tnas_net_ok"`   // its Technitium reaches the internet
-	ServerNetOK  bool      `json:"server_net_ok"` // same for the server's; kept as it was while the server is down
-	TNASUp       bool      `json:"tnas_up"`       // its LAN IP answers; with RouterOK, it is on the LAN
-	ServerUp     bool      `json:"server_up"`     // NPM or ping answered; meaningless without the router
-	ServerNPMOK  bool      `json:"server_npm_ok"`
-	NPMFailSince time.Time `json:"npm_fail_since,omitzero"`
-	NPMAlerted   bool      `json:"npm_alerted,omitempty"`
-	TNASNPM      struct {
+	RouterOK       bool              `json:"router_ok"`
+	TNASNetOK      bool              `json:"tnas_net_ok"`   // its Technitium reaches the internet
+	ServerNetOK    bool              `json:"server_net_ok"` // same for the server's; kept as it was while the server is down
+	TNASUp         bool              `json:"tnas_up"`       // its LAN IP answers; with RouterOK, it is on the LAN
+	ServerUp       bool              `json:"server_up"`     // NPM or ping answered; meaningless without the router
+	ServerNPMOK    bool              `json:"server_npm_ok"`
+	NPMFailSince   time.Time         `json:"npm_fail_since,omitzero"`
+	ServerDown     time.Time         `json:"server_down,omitzero"` // since when neither its NPM nor a ping answers
+	ServerDownTold bool              `json:"server_down_told,omitempty"`
+	CertBad        map[string]string `json:"cert_bad,omitempty"`      // host → its certificate's problem, told once, across restarts
+	MirrorGen      int64             `json:"mirror_gen,omitempty"`    // the mirror's btrfs generation, last seen
+	MirrorChanged  time.Time         `json:"mirror_changed,omitzero"` // when it last moved
+	MirrorStale    bool              `json:"mirror_stale,omitempty"`  // told that it stopped
+	MirrorSeen     map[string]int64  `json:"mirror_seen,omitempty"`   // folder → its compose's mtime, an hour ago
+	MirrorNew      []string          `json:"mirror_new,omitempty"`    // new folders, not protected, until seen in the page
+	Verdict        Verdict           `json:"verdict,omitzero"`
+	NPMAlerted     bool              `json:"npm_alerted,omitempty"`
+	TNASNPM        struct {
 		Snapshot string    `json:"snapshot,omitempty"`
 		Since    time.Time `json:"since,omitzero"`
 		OK       bool      `json:"ok"`
+		Up       bool      `json:"up,omitempty"` // compose up done: a restart before it starts it again
 		Msg      string    `json:"msg,omitempty"`
 	} `json:"tnas_npm"`
 	MaintUntil   time.Time            `json:"maint_until,omitzero"`
@@ -293,6 +352,7 @@ type System interface {
 	Resolve(ip string) error            // the resolver at ip answers for a name from the internet
 	GetIcon(url string) ([]byte, error) // like Get, for the icons' CDN
 	SendMail(m Mail) error
+	PortFree(proto, addr string) error // nothing listens on addr of this host (the agent runs with its network)
 }
 
 type Agent struct {
@@ -324,19 +384,22 @@ type Agent struct {
 	procRoute  string                    // the route table the discovery reads (tests set another)
 	ifaces     func() []ifaceAddr        // the interfaces the discovery reads (tests set others)
 	wake       chan struct{}
-	view       atomic.Pointer[[]byte]
+	view       atomic.Pointer[view]
 	pulling    atomic.Bool
 	scanning   atomic.Bool
 	rescan     atomic.Bool // asked for while a scan ran
 	beats      map[string][]Beat
-	tnasSeen   bool              // last TNAS ping, so a change is logged once
-	certBad    map[string]string // host → its certificate's problem, so a change is told once
+	tnasSeen   bool // last TNAS ping, so a change is logged once
 	userPath   string
 	creds      atomic.Pointer[creds] // read by every request, so outside mu; nil: no account yet
 	started    time.Time             // the account can be made in the first 30 minutes after it
 	lastBeat   atomic.Int64          // the last check or command that ended, as time since started (monotonic), for the watchdog
 	watchCfg   atomic.Pointer[watchCfg]
-	exit       func(code int) // os.Exit; tests set another
+	exit       func(code int)      // os.Exit; tests set another
+	saved      []byte              // state.json as last written
+	sleep      func(time.Duration) // time.Sleep; tests set one that does not wait
+	mirrorAt   time.Time           // when watchMirror last looked
+	tickAt     time.Time           // when the running tick started, on the wall clock
 	sessions   sessions
 }
 
@@ -367,7 +430,10 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 	a.events = evs
 	a.trimEvents()
 	a.tnasIP.Store(&cfg.TNASIP)
-	a.iconRev, a.certBad = map[string]string{}, map[string]string{}
+	a.iconRev = map[string]string{}
+	if a.st.CertBad == nil {
+		a.st.CertBad = map[string]string{}
+	}
 	a.procRoute, a.ifaces = "/proc/net/route", systemIfaces
 	a.userPath = filepath.Join(filepath.Dir(cfgPath), "user.yml")
 	c, err := loadUser(a.userPath)
@@ -375,7 +441,7 @@ func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error)
 		return nil, err
 	}
 	a.creds.Store(c)
-	a.exit = os.Exit
+	a.exit, a.sleep = os.Exit, time.Sleep
 	if a.st.Running {
 		a.crashed()
 	}
@@ -397,11 +463,11 @@ func (a *Agent) Run(ctx context.Context) {
 		a.save()
 		a.mu.Unlock()
 	}()
-	for {
+	for first := true; ; first = false {
 		a.mu.Lock()
-		stale := time.Since(a.st.ImagesAt) > time.Hour
+		stale := time.Since(a.st.ImagesAt) > 24*time.Hour
 		a.mu.Unlock()
-		if stale {
+		if first || stale && !a.scanning.Load() { // at start, then after the nightly pull, and once a day at most without it
 			go a.scanImages()
 		}
 		a.Tick(time.Now())
@@ -428,10 +494,11 @@ func (a *Agent) Tick(now time.Time) {
 	p := a.probe()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.now = now
+	a.now, a.tickAt = now, time.Now()
 	a.evaluate(p)
 	a.stopIdleNPM()
 	a.nightly()
+	a.watchMirror()
 	a.flushAlerts()
 	if a.now.Format(time.DateOnly) != a.trimmedOn {
 		a.trimEvents()
@@ -462,16 +529,16 @@ func (a *Agent) service(name string) (Service, bool) {
 // noteCert tells once that host's certificate stopped verifying (an alert:
 // it will not renew itself while it goes unseen) and once that it is back.
 func (a *Agent) noteCert(host, bad string) {
-	was := a.certBad[host]
+	was := a.st.CertBad[host]
 	if was == bad {
 		return
 	}
 	if bad == "" {
-		delete(a.certBad, host)
+		delete(a.st.CertBad, host)
 		a.event("", "certificado de "+host+" válido outra vez")
 		return
 	}
-	a.certBad[host] = bad
+	a.st.CertBad[host] = bad
 	a.alert("", bad+"; conta como a responder, sem failover")
 }
 
@@ -682,6 +749,23 @@ func (a *Agent) evaluate(p probe) {
 func (a *Agent) serverNPM(p probe) (known bool) {
 	st := &a.st
 	st.ServerNPMOK, st.ServerUp = p.npmOK, p.npmOK || p.serverPing
+	switch {
+	case !st.ServerUp && st.ServerDown.IsZero():
+		st.ServerDown = a.now // one check could be a blip: told at the second
+	case !st.ServerUp && !st.ServerDownTold && a.now.After(st.ServerDown):
+		st.ServerDownTold = true
+		msg := "o servidor não responde (nem o NPM nem o ping) desde as " + st.ServerDown.Format("15:04")
+		if st.MaintUntil.IsZero() { // one email; in a maintenance (a planned reboot), the event
+			a.alert("", msg)
+		} else {
+			a.event("", msg+", em manutenção")
+		}
+	case st.ServerUp && !st.ServerDown.IsZero():
+		if st.ServerDownTold {
+			a.event("", "o servidor responde outra vez, depois de "+fmtDur(a.now.Sub(st.ServerDown))+" em baixo")
+		}
+		st.ServerDown, st.ServerDownTold = time.Time{}, false
+	}
 	if st.ServerNPMOK {
 		if st.NPMAlerted {
 			a.alert("", "NPM do servidor voltou")
@@ -702,12 +786,25 @@ func (a *Agent) serverNPM(p probe) (known bool) {
 	return false
 }
 
+// set moves a service to state and saves at once: the page shows every
+// step of a tick, and a restart in the middle of one resumes from it.
 func (a *Agent) set(s *SvcState, state string) {
 	s.State, s.Since = state, a.now
 	s.FailSince, s.OKSince, s.Observed, s.Msg = time.Time{}, time.Time{}, false, ""
 	if state != FailingOver && state != Active { // a forced failover lasts until it is left
 		s.Forced = false
 	}
+	switch state {
+	case FailingOver:
+		s.Steps = []Step{{"início", time.Now()}}
+	case Active:
+		s.OnTNAS = a.now
+	case Normal:
+		s.OnTNAS, s.LastErr, s.Steps = time.Time{}, "", nil
+	case Error:
+		s.OnTNAS = time.Time{}
+	}
+	a.save()
 }
 
 // step advances one service; known=false means its server side could not be checked.
@@ -740,7 +837,7 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 		if !auto {
 			if !s.Observed {
 				s.Observed = true
-				a.event(sv.Name, "[observação] o failover começaria agora")
+				a.alert(sv.Name, "[observação] o failover começaria agora")
 			}
 			return
 		}
@@ -768,7 +865,7 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 		if !auto {
 			if !s.Observed {
 				s.Observed = true
-				a.event(sv.Name, "[observação] o regresso começaria agora")
+				a.alert(sv.Name, "[observação] o regresso começaria agora")
 			}
 			return
 		}
@@ -777,13 +874,56 @@ func (a *Agent) step(sv Service, s *SvcState, known, ok bool) {
 	case Returning:
 		a.giveBack(sv, s)
 	case Error:
-		// Healthy on the server again: clean up whatever is left and reset.
-		if known && ok {
+		switch {
+		case known && ok: // healthy on the server again: clean up whatever is left and reset
 			a.set(s, Returning)
 			a.giveBack(sv, s)
+		case known && auto && !a.inMaint(s) && a.home(s) && a.now.Sub(s.Since) >= minutes(a.cfg.StartTimeoutMin):
+			// still down on the server: try again, as its cause may be gone (the
+			// internet back for a pull, a port freed, an override fixed)
+			a.event(sv.Name, "nova tentativa de failover depois do erro: "+s.Msg)
+			a.set(s, FailingOver)
+			a.failover(sv, s)
 		}
 	}
 }
+
+// waitCopy asks the copy, through the TNAS NPM, whether it answers (R5):
+// the DNS changes only once it does.
+func (a *Agent) waitCopy(sv Service, s *SvcState) error {
+	c := &a.cfg
+	// It is asked again every 5 s for up to a minute (never more than one
+	// check interval), so the DNS changes seconds after the copy answers.
+	// ponytail: services are stepped one after another under mu, so a copy
+	// that never answers delays the next one by that minute each tick until
+	// its start timeout; a shared poll over all FAILING_OVER copies if it hurts.
+	var err error
+	deadline := time.Now().Add(time.Duration(min(c.CheckIntervalS, 60)) * time.Second)
+	for try := range max(1, min(c.CheckIntervalS, 60)/copyPoll) {
+		if try > 0 {
+			if time.Now().Add(copyPoll * time.Second).After(deadline) {
+				break
+			}
+			s.Msg = "à espera da cópia: " + err.Error()
+			a.publish()
+			a.sleep(copyPoll * time.Second)
+			a.beat() // still moving: the watchdog must not see a stuck check
+		}
+		var bad string
+		if bad, err = certOK(a.sys.Check(sv.Host, c.TNASIP)); err == nil {
+			a.noteCert(sv.Host, bad)
+			if !hasStep(s, "resposta") {
+				a.markStep(s, "resposta")
+			}
+			break
+		}
+	}
+	return err
+}
+
+// copyPoll is how often, in seconds, a copy that is starting is asked
+// whether it answers.
+const copyPoll = 5
 
 func (a *Agent) failover(sv Service, s *SvcState) {
 	c := &a.cfg
@@ -794,10 +934,12 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 	if s.Snapshot == "" && !a.startCopy(sv, s) {
 		return
 	}
-	// R5: the copy is checked through the TNAS NPM; DNS only after it is healthy.
-	bad, err := certOK(a.sys.Check(sv.Host, c.TNASIP))
+	// a restart between the snapshot and the copy's start: start it now (both steps can run again)
+	if s.Snapshot != "" && !hasStep(s, "arranque") && !a.upCopy(sv, s) {
+		return
+	}
+	err := a.waitCopy(sv, s)
 	if err == nil {
-		a.noteCert(sv.Host, bad)
 		err = a.addDNS(sv, s)
 	}
 	if err != nil {
@@ -808,8 +950,12 @@ func (a *Agent) failover(sv Service, s *SvcState) {
 		}
 		return
 	}
+	msg := msgFailover
+	if t := stepTimes(s.Steps); t != "" {
+		msg += " (" + t + ")"
+	}
 	a.set(s, Active)
-	a.alert(sv.Name, "em failover no TNAS")
+	a.alert(sv.Name, msg)
 }
 
 // addDNS points the service's name to the TNAS, unless it already does.
@@ -822,6 +968,7 @@ func (a *Agent) addDNS(sv Service, s *SvcState) error {
 	}
 	s.DNS = true
 	s.Msg = ""
+	a.markStep(s, "DNS")
 	a.event(sv.Name, "DNS: "+sv.Host+" → "+a.cfg.TNASIP+" (TNAS)")
 	return nil
 }
@@ -835,9 +982,13 @@ func (a *Agent) startCopy(sv Service, s *SvcState) bool {
 			return false
 		}
 	}
-	if err := a.ensureNPM(); err != nil {
+	started, err := a.ensureNPM()
+	if err != nil {
 		a.fail(sv, s, "NPM do TNAS: "+err.Error())
 		return false
+	}
+	if started {
+		a.markStep(s, "NPM")
 	}
 	snap, err := a.snapshot(sv.Name)
 	if err != nil {
@@ -846,11 +997,66 @@ func (a *Agent) startCopy(sv Service, s *SvcState) bool {
 	}
 	s.Snapshot = snap
 	a.event(sv.Name, "failover iniciado a partir de "+snap)
-	if err := a.compose(sv.Name, a.cfg.files(snap, sv.Dir, sv.Override), "up", "-d"); err != nil {
+	a.markStep(s, "snapshot")
+	a.save() // a restart from here on knows the snapshot: failover() starts the copy again
+	return a.upCopy(sv, s)
+}
+
+// upCopy pulls the missing images and starts the copy from its snapshot;
+// both can run again, after a restart in the middle. The start timeout
+// counts from here: a slow download is not a copy that does not start.
+func (a *Agent) upCopy(sv Service, s *SvcState) bool {
+	if _, err := a.ensureNPM(); err != nil { // after a restart the NPM may not be up yet either
+		a.fail(sv, s, "NPM do TNAS: "+err.Error())
+		return false
+	}
+	files := a.cfg.files(s.Snapshot, sv.Dir, sv.Override)
+	if err := a.pullMissing(sv.Name, s, files); err != nil {
+		a.fail(sv, s, "sem as imagens: "+err.Error())
+		return false
+	}
+	if err := a.compose(sv.Name, files, "up", "-d"); err != nil {
 		a.fail(sv, s, "compose up: "+err.Error())
 		return false
 	}
+	// the tick's clock, moved by the whole minutes this tick has taken (a slow pull, the NPM's start)
+	s.Since = a.now.Add(time.Since(a.tickAt).Truncate(time.Minute))
+	a.markStep(s, "arranque")
 	return true
+}
+
+func hasStep(s *SvcState, name string) bool {
+	return slices.ContainsFunc(s.Steps, func(x Step) bool { return x.Name == name })
+}
+
+// pullMissing pulls the images of stack the last scan did not find on the
+// TNAS, as a step of its own the page shows.
+func (a *Agent) pullMissing(stack string, s *SvcState, files []string) error {
+	var n int
+	for _, im := range a.st.Images[stack].Images {
+		if !im.Present {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	msg := fmt.Sprintf("a descarregar %d %s em falta no TNAS", n, map[bool]string{true: "imagem", false: "imagens"}[n == 1])
+	a.event(stack, msg)
+	if s != nil {
+		s.Msg = msg + "…"
+		a.publish()
+	}
+	// only the missing ones: a present :latest must stay the version the mirrored data knows
+	if err := a.compose(stack, files, "pull", "--policy", "missing", "-q"); err != nil {
+		return err
+	}
+	a.event(stack, "imagens descarregadas")
+	if s != nil {
+		s.Msg = ""
+		a.markStep(s, "imagens")
+	}
+	return nil
 }
 
 func (a *Agent) fail(sv Service, s *SvcState, msg string) {
@@ -859,6 +1065,12 @@ func (a *Agent) fail(sv Service, s *SvcState, msg string) {
 		msg += "; limpeza falhou: " + err.Error()
 	}
 	s.Msg = msg
+	stage, _, _ := strings.Cut(msg, ": ") // compose up, snapshot, IP … ocupado: stderr carries ids that change
+	if s.LastErr == stage {               // a retry that failed the same way: in the events, not another email
+		a.event(sv.Name, "ERRO: "+msg)
+		return
+	}
+	s.LastErr = stage
 	a.alert(sv.Name, "ERRO: "+msg)
 }
 
@@ -886,29 +1098,51 @@ func (a *Agent) teardown(sv Service, s *SvcState) error {
 
 func (a *Agent) giveBack(sv Service, s *SvcState) {
 	if err := a.teardown(sv, s); err != nil {
-		a.warn(&s.Msg, sv.Name, "regresso por concluir: "+err.Error())
+		const stuck = "regresso por concluir: "
+		if !strings.HasPrefix(s.Msg, stuck) { // clients may still be sent to the TNAS: someone should know, once
+			a.alert(sv.Name, stuck+err.Error())
+		}
+		a.warn(&s.Msg, sv.Name, stuck+err.Error())
 		return
 	}
+	on := a.now.Sub(s.OnTNAS)
+	msg := msgBack
+	if s.OnTNAS.IsZero() { // a failover that never served
+		on = 0
+	} else {
+		msg += " após " + fmtDur(on) + " no TNAS"
+	}
 	a.set(s, Normal)
-	a.alert(sv.Name, "de volta ao servidor")
+	a.alertFor(sv.Name, msg, on)
 }
 
-func (a *Agent) ensureNPM() error {
+// ensureNPM starts the TNAS NPM from a snapshot unless it runs; started says
+// it had to. A restart after its snapshot but before its start starts it now.
+func (a *Agent) ensureNPM() (started bool, err error) {
 	n := &a.st.TNASNPM
-	if n.Snapshot != "" {
-		return nil
+	if n.Snapshot != "" && n.Up {
+		return false, nil
 	}
-	snap, err := a.snapshot("npm")
-	if err != nil {
-		return err
+	if n.Snapshot == "" {
+		snap, err := a.snapshot("npm")
+		if err != nil {
+			return false, err
+		}
+		n.Snapshot, n.Since, n.OK, n.Msg = snap, a.now, false, ""
+		a.save()
 	}
-	n.Snapshot, n.Since, n.OK, n.Msg = snap, a.now, false, ""
 	// On failure stopIdleNPM cleans it up at the end of the tick.
-	if err := a.compose("npm", a.cfg.files(snap, a.cfg.NPM.Dir, ""), "up", "-d"); err != nil {
-		return err
+	files := a.cfg.files(n.Snapshot, a.cfg.NPM.Dir, "")
+	if err := a.pullMissing("npm", nil, files); err != nil {
+		return false, err
 	}
-	a.event("", "NPM do TNAS arrancou a partir de "+snap)
-	return nil
+	if err := a.compose("npm", files, "up", "-d"); err != nil {
+		return false, err
+	}
+	n.Up = true
+	a.event("", "NPM do TNAS arrancou a partir de "+n.Snapshot)
+	a.save()
+	return true, nil
 }
 
 func (a *Agent) stopIdleNPM() {
@@ -929,7 +1163,7 @@ func (a *Agent) stopIdleNPM() {
 		a.warn(&n.Msg, "", "NPM do TNAS por parar: "+err.Error())
 		return
 	}
-	n.Snapshot, n.Since, n.OK, n.Msg = "", time.Time{}, false, ""
+	n.Snapshot, n.Since, n.OK, n.Up, n.Msg = "", time.Time{}, false, false, ""
 	a.event("", "NPM do TNAS parado")
 }
 
@@ -1010,31 +1244,11 @@ func (a *Agent) dns(op, host string) error {
 		q.Set("ttl", strconv.Itoa(d.TTL))
 		q.Set("overwrite", "true")
 	}
-	err = technitium(a.sys, d.APIURL, "records/"+op, q, strings.TrimSpace(string(tok)))
+	err = technitiumJSON(a.sys, d.APIURL, "zones/records/"+op, q, strings.TrimSpace(string(tok)), nil)
 	if op == "delete" && err != nil && strings.Contains(err.Error(), "no such record exists") {
 		return nil
 	}
 	return err
-}
-
-// technitium calls /api/zones/<path> of the Technitium API; its errorMessage
-// becomes the error.
-func technitium(sys System, apiURL, path string, q url.Values, token string) error {
-	body, err := sys.Get(strings.TrimRight(apiURL, "/")+"/api/zones/"+path+"?"+q.Encode(), token)
-	if err != nil {
-		return err
-	}
-	var r struct {
-		Status       string `json:"status"`
-		ErrorMessage string `json:"errorMessage"`
-	}
-	if err := json.Unmarshal(body, &r); err != nil {
-		return fmt.Errorf("resposta inválida do Technitium: %w", err)
-	}
-	if r.Status != "ok" {
-		return fmt.Errorf("technitium %s: %s", r.Status, r.ErrorMessage)
-	}
-	return nil
 }
 
 // testToken asks the Technitium for the zone with token: ok means DNS changes will work.
@@ -1042,7 +1256,7 @@ func testToken(sys System, apiURL, zone, token string) error {
 	if token == "" {
 		return errors.New("falta o token")
 	}
-	return technitium(sys, apiURL, "records/get", url.Values{"domain": {zone}, "zone": {zone}}, token)
+	return technitiumJSON(sys, apiURL, "zones/records/get", url.Values{"domain": {zone}, "zone": {zone}}, token, nil)
 }
 
 // hasToken reports whether token_file holds a token; the token itself never leaves the file.
@@ -1059,8 +1273,9 @@ type Image struct {
 }
 
 type Stack struct {
-	Images []Image `json:"images"`
-	Err    string  `json:"err,omitempty"`
+	Images []Image  `json:"images"`
+	Err    string   `json:"err,omitempty"`
+	Notes  []string `json:"notes,omitempty"` // what the TNAS lacks for it to start
 }
 
 // scanImages lists, for every stack a failover can start, the images its
@@ -1080,49 +1295,47 @@ func (a *Agent) scanImages() {
 	for {
 		a.scanOnce()
 		if !a.rescan.Swap(false) {
-			return
+			break
 		}
 	}
+	a.checkReady()
 }
 
 func (a *Agent) scanOnce() {
 	a.mu.Lock()
 	c := a.cfg
+	running := map[string]bool{"npm": a.st.TNASNPM.Snapshot != ""}
+	starting := false // a copy starting now binds its ports: probing them could make it fail
+	for _, sv := range c.Services {
+		s := a.svc(sv.Name)
+		running[sv.Name] = !a.home(s)
+		starting = starting || s.State == FailingOver
+	}
+	if starting {
+		for k := range running {
+			running[k] = true
+		}
+	}
 	a.publish() // shows the scan in progress
 	a.mu.Unlock()
 
+	var mu sync.Mutex // guards stacks and missing: the stacks are read side by side
 	stacks := map[string]Stack{}
 	var missing []string
 	scan := func(name, dir, override string) {
-		args := slices.Concat([]string{"compose", "-p", "failover-" + name}, c.files(c.Paths.MirrorSubvol, dir, override), []string{"config", "--images"})
-		out, err := a.sys.Output("docker", args...)
-		if err != nil {
-			stacks[name] = Stack{Err: err.Error()}
-			missing = append(missing, name+" (compose ilegível)")
-			return
-		}
-		refs := strings.Fields(out)
-		slices.Sort(refs)
-		var st Stack
-		for _, ref := range slices.Compact(refs) {
-			img := Image{Ref: ref}
-			if out, err := a.sys.Output("docker", "image", "inspect", "--format", "{{.Size}} {{.Created}}", ref); err == nil {
-				img.Present = true
-				if f := strings.Fields(out); len(f) == 2 {
-					img.Size, _ = strconv.ParseInt(f[0], 10, 64)
-					img.Created, _ = time.Parse(time.RFC3339Nano, f[1])
-				}
-			} else {
-				missing = append(missing, ref)
-			}
-			st.Images = append(st.Images, img)
-		}
-		stacks[name] = st
+		st, miss := a.scanStack(c, name, dir, override, running[name])
+		mu.Lock()
+		stacks[name], missing = st, append(missing, miss...)
+		mu.Unlock()
 	}
-	scan("npm", c.NPM.Dir, "")
+	var wg sync.WaitGroup
+	wg.Go(func() { scan("npm", c.NPM.Dir, "") })
 	for _, sv := range c.Services {
-		scan(sv.Name, sv.Dir, sv.Override)
+		wg.Go(func() { scan(sv.Name, sv.Dir, sv.Override) })
 	}
+	wg.Wait()
+	slices.Sort(missing)
+	missing = slices.Compact(missing)
 
 	logImageBalance(stacks)
 
@@ -1140,9 +1353,67 @@ func (a *Agent) scanOnce() {
 	a.save()
 }
 
-// logImageBalance logs how many of the images the stacks need the TNAS has,
-// each image counted once however many stacks use it.
-func logImageBalance(stacks map[string]Stack) {
+// scanStack reads one stack's resolved compose: its images and whether the
+// TNAS has them, and what the TNAS lacks for it to start. missing are the
+// images it lacks, or the stack when its compose does not resolve.
+func (a *Agent) scanStack(c Config, name, dir, override string, running bool) (st Stack, missing []string) {
+	args := slices.Concat([]string{"compose", "-p", "failover-" + name}, c.files(c.Paths.MirrorSubvol, dir, override), []string{"config", "--format", "json"})
+	out, err := a.sys.Output("docker", args...)
+	var info composeInfo
+	if err == nil {
+		info, err = analyzeCompose([]byte(out), c.LANIface)
+	}
+	if err != nil {
+		return Stack{Err: err.Error()}, []string{name + " (compose ilegível)"}
+	}
+	for _, ref := range info.Images {
+		img := Image{Ref: ref}
+		if out, err := a.sys.Output("docker", "image", "inspect", "--format", "{{.Size}} {{.Created}}", ref); err == nil {
+			img.Present = true
+			if f := strings.Fields(out); len(f) == 2 {
+				img.Size, _ = strconv.ParseInt(f[0], 10, 64)
+				img.Created, _ = time.Parse(time.RFC3339Nano, f[1])
+			}
+		} else {
+			missing = append(missing, ref)
+		}
+		st.Images = append(st.Images, img)
+	}
+	st.Notes = a.tnasNotes(info, running)
+	return st, missing
+}
+
+// tnasNotes is what the TNAS lacks for a stack to start there: an external
+// network it does not have, a port it publishes that something already
+// holds. A running copy holds its own ports, so running skips them.
+func (a *Agent) tnasNotes(info composeInfo, running bool) []string {
+	var notes []string
+	for _, n := range info.External {
+		if a.sys.Run("docker", "network", "inspect", n) != nil {
+			notes = append(notes, "a rede "+n+" não existe no TNAS: cria-a com docker network create "+n)
+		}
+	}
+	if running {
+		return notes
+	}
+	for _, p := range info.Published {
+		addr, shown := net.JoinHostPort(p.HostIP, strconv.Itoa(p.Port)), strconv.Itoa(p.Port)
+		if p.HostIP != "" {
+			shown = addr
+		}
+		if err := a.sys.PortFree(p.Proto, addr); err != nil {
+			notes = append(notes, fmt.Sprintf("a porta %s/%s já está ocupada no TNAS", shown, p.Proto))
+		}
+	}
+	return notes
+}
+
+// logImageBalance logs how many of the images the stacks need the TNAS has.
+func logImageBalance(stacks map[string]Stack) { slog.Info("imagens: " + imageBalance(stacks)) }
+
+// imageBalance is how many of the images the stacks need the TNAS has, each
+// counted once however many stacks use it: "5 de 6 no TNAS, 2,5 GB".
+func imageBalance(stacks map[string]Stack) string {
 	seen := map[string]Image{}
 	for _, st := range stacks {
 		for _, im := range st.Images {
@@ -1158,7 +1429,7 @@ func logImageBalance(stacks map[string]Stack) {
 		}
 	}
 	gb := strings.Replace(strconv.FormatFloat(float64(size)/1e9, 'f', 1, 64), ".", ",", 1)
-	slog.Info(fmt.Sprintf("imagens: %d de %d no TNAS, %s GB", present, len(seen), gb))
+	return fmt.Sprintf("%d de %d no TNAS, %s GB", present, len(seen), gb)
 }
 
 // nightly pulls every image once a day after prepull_at, from the compose
@@ -1189,21 +1460,29 @@ func (a *Agent) nightly() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.now = time.Now()
-		if failed != nil {
-			a.event("", "falha ao descarregar imagens: "+strings.Join(failed, "; "))
+		balance := imageBalance(a.st.Images)
+		if failed != nil { // a hole in the safety net: told the same morning
+			a.alert("", "descarga noturna com falhas ("+balance+"): "+strings.Join(failed, "; "))
 		} else {
-			a.event("", "imagens descarregadas")
+			a.event("", "descarga noturna: imagens "+balance)
 		}
 		a.save()
 	}()
 }
 
+// save publishes the view and writes state.json, only when it changed: a
+// quiet check changes nothing that must survive a restart.
 func (a *Agent) save() {
 	a.publish()
 	b, _ := json.MarshalIndent(&a.st, "", "  ")
+	if bytes.Equal(b, a.saved) {
+		return
+	}
 	if err := writeAtomic(a.statePath, b); err != nil {
 		slog.Error("guardar estado", "error", err)
+		return
 	}
+	a.saved = b
 }
 
 func userOf(c *creds) string {
@@ -1274,12 +1553,20 @@ func (a *Agent) publish() {
 		SetupPending     bool      `json:"setup_pending"`
 		UIListenRunning  string    `json:"ui_listen_running"`
 		Cert             any       `json:"cert"`
+		MirrorChanged    time.Time `json:"mirror_changed,omitzero"`
+		MirrorStale      bool      `json:"mirror_stale"`
+		MirrorNew        []string  `json:"mirror_new"`
+		Verdict          Verdict   `json:"verdict"`
 	}{
 		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
 		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},
+		a.st.MirrorChanged, a.st.MirrorStale, a.st.MirrorNew, a.st.Verdict,
 	})
-	a.view.Store(&b)
+	a.view.Store(&view{b, gzipBytes(b)})
 }
+
+// view is the published status, and the same gzipped once for every poll.
+type view struct{ raw, gz []byte }

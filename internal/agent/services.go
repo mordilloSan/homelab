@@ -149,7 +149,7 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	if yml != "" {
 		sv.Override = cmp.Or(old.Override, sv.Name+".override.yml")
 	}
-	if i >= 0 && a.svc(sv.Name).State != Normal {
+	if i >= 0 && !a.home(a.svc(sv.Name)) {
 		if sv.Dir != old.Dir || sv.Host != old.Host || sv.RequireFreeIP != old.RequireFreeIP || !sameOverride(a.cfg.Paths.OverridesDir, old, yml) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a pasta, o endereço, o override e o IP só mudam com o serviço no servidor"})
 			return
@@ -200,7 +200,9 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a.iconJobs.Go(a.fetchIcons) // no link: dashboard-icons by name or folder
 	}
-	go a.scanImages()
+	if req.New || sv.Dir != old.Dir || sv.Override != old.Override || checked != "" { // the stack changed: its images may be others
+		go a.scanImages()
+	}
 	a.done(w, sv.Name, map[bool]string{true: "serviço adicionado", false: "serviço alterado"}[req.New])
 }
 
@@ -276,7 +278,7 @@ func (a *Agent) postServiceRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "serviço desconhecido", http.StatusNotFound)
 		return
 	}
-	if a.svc(req.Name).State != Normal {
+	if !a.home(a.svc(req.Name)) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "só se remove com o serviço no servidor"})
 		return
 	}

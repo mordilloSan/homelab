@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -22,6 +26,41 @@ import (
 //go:embed web/index.html
 var indexHTML []byte
 
+// The app's icon (the header's logo, with room around it for a phone's mask)
+// and the manifest that lets a phone install the page on its home screen.
+var (
+	appIcon  = []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#2052c2"/><path fill="#fff" transform="translate(5 5) scale(.583)" d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg>`)
+	manifest = []byte(`{"name":"Failover do homelab","short_name":"Failover","start_url":"/","scope":"/","display":"standalone",
+"background_color":"#1b2635","theme_color":"#1b2635","icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}`)
+)
+
+// The page, gzipped once, and its ETag: a reload that finds it unchanged is
+// a 304 of a few bytes instead of 140 KB.
+var (
+	indexGz   = gzipBytes(indexHTML)
+	indexETag = func() string { h := sha256.Sum256(indexHTML); return `"` + hex.EncodeToString(h[:8]) + `"` }()
+)
+
+func gzipBytes(b []byte) []byte {
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	_, _ = zw.Write(b)
+	_ = zw.Close()
+	return buf.Bytes()
+}
+
+// writeBody sends raw, or gz (the same, gzipped) to a client that takes it.
+func writeBody(w http.ResponseWriter, r *http.Request, ctype string, raw, gz []byte) {
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Add("Vary", "Accept-Encoding")
+	if gz != nil && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(gz)
+		return
+	}
+	_, _ = w.Write(raw)
+}
+
 // Inter, the LinuxIO typeface (SIL OFL 1.1), embedded so the page needs no internet.
 //
 //go:embed web/inter.woff2
@@ -29,17 +68,22 @@ var interFont []byte
 
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux() // everything here needs a session
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(indexHTML)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache") // kept, but asked again each time: an update shows at once
+		w.Header().Set("ETag", indexETag)
+		if r.Header.Get("If-None-Match") == indexETag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		writeBody(w, r, "text/html; charset=utf-8", indexHTML, indexGz)
 	})
-	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(*a.view.Load())
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+		v := a.view.Load()
+		writeBody(w, r, "application/json", v.raw, v.gz)
 	})
-	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(a.eventsSnapshot())
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(a.eventsSnapshot())
+		writeBody(w, r, "application/json", b, gzipBytes(b))
 	})
 	mux.HandleFunc("POST /api/config", a.postConfig)
 	mux.HandleFunc("POST /api/config/section", a.postSection)
@@ -63,6 +107,13 @@ func (a *Agent) Handler() http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 	})
 	mux.HandleFunc("POST /api/logout", a.postLogout)
+	mux.HandleFunc("POST /api/mirror/seen", func(w http.ResponseWriter, _ *http.Request) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.st.MirrorNew = nil // the page showed them: the hint goes
+		a.save()
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	root := http.NewServeMux() // open: the login and what it shows
 	root.HandleFunc("GET /login", a.getLogin)
@@ -72,6 +123,16 @@ func (a *Agent) Handler() http.Handler {
 		w.Header().Set("Content-Type", "font/woff2")
 		w.Header().Set("Cache-Control", "private, max-age=604800")
 		_, _ = w.Write(interFont)
+	})
+	// to install the page on a phone's home screen: open, as the browser asks without the session
+	root.HandleFunc("GET /manifest.webmanifest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/manifest+json")
+		_, _ = w.Write(manifest)
+	})
+	root.HandleFunc("GET /icon.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		_, _ = w.Write(appIcon)
 	})
 	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

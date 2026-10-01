@@ -1,0 +1,216 @@
+package agent
+
+import (
+	"cmp"
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// The mirror, watched once an hour from the tick: whether the TOS backup
+// still writes to it (its btrfs generation), and its folders, so a new one
+// or a changed compose is told the same day, not the day it would matter.
+
+const mirrorEvery = time.Hour
+
+// watchMirror runs from the tick, under mu; it is a few stats and one btrfs
+// call, and only once an hour.
+func (a *Agent) watchMirror() {
+	if !a.mirrorAt.IsZero() && a.now.Sub(a.mirrorAt) < mirrorEvery {
+		return
+	}
+	a.mirrorAt = a.now
+	a.mirrorGeneration()
+	a.mirrorFolders()
+}
+
+// mirrorGeneration asks btrfs which files had data written since the last
+// look (find-new lists only those: a snapshot of the mirror or an access
+// time moves the subvolume's generation but writes no data). None for
+// mirror_stale_days means the backup stopped, and a failover would start
+// from data that old.
+func (a *Agent) mirrorGeneration() {
+	st := &a.st
+	since := st.MirrorGen
+	if since == 0 {
+		since = 1 << 62 // the first look: only the marker, not every file of the mirror
+	}
+	out, err := a.sys.Output("btrfs", "subvolume", "find-new", a.cfg.Paths.MirrorSubvol, strconv.FormatInt(since, 10))
+	if err != nil {
+		return // not a btrfs subvolume here (the e2e): nothing to tell
+	}
+	var marker int64
+	written := false
+	for line := range strings.SplitSeq(out, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "transid marker was "); ok {
+			marker, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		} else if strings.TrimSpace(line) != "" {
+			written = true
+		}
+	}
+	first := st.MirrorGen == 0
+	if marker > 0 {
+		st.MirrorGen = marker
+	}
+	if first || written {
+		if st.MirrorStale {
+			a.event("", "o espelho voltou a mudar: o backup do TOS está outra vez a correr")
+		}
+		st.MirrorChanged, st.MirrorStale = a.now, false
+		return
+	}
+	days := cmp.Or(a.cfg.Paths.MirrorStaleDays, 2)
+	if !st.MirrorStale && a.now.Sub(st.MirrorChanged) >= time.Duration(days)*24*time.Hour {
+		st.MirrorStale = true
+		a.alert("", fmt.Sprintf("o espelho não muda desde %s: o backup do TOS parou? Um failover arrancaria com os dados desse dia", st.MirrorChanged.Format("02/01 15:04")))
+	}
+}
+
+// mirrorFolders compares the folders with a docker-compose.yml, and when
+// each one changed, with what it saw an hour ago.
+func (a *Agent) mirrorFolders() {
+	c, st := &a.cfg, &a.st
+	root := filepath.Join(c.Paths.MirrorSubvol, c.Paths.MirrorRoot)
+	if _, err := os.Stat(root); err != nil {
+		return // not there (being mounted, a wrong path): the settings' checks say so
+	}
+	now := map[string]int64{}
+	for _, d := range append(mirrorDirs(root, c.NPM.Dir), c.NPM.Dir) {
+		if fi, err := os.Stat(filepath.Join(root, d, "docker-compose.yml")); err == nil {
+			now[d] = fi.ModTime().Unix()
+		}
+	}
+	owner := map[string]string{c.NPM.Dir: "npm"}
+	for _, sv := range c.Services {
+		owner[sv.Dir] = sv.Name
+	}
+	if st.MirrorSeen == nil { // the first look: what is there is known, not new
+		st.MirrorSeen = now
+		return
+	}
+	var changed bool
+	for _, d := range sortedKeys(now) {
+		old, seen := st.MirrorSeen[d]
+		name := owner[d]
+		switch {
+		case !seen && name == "":
+			st.MirrorNew = append(st.MirrorNew, d)
+			a.alert("", "pasta nova no espelho: "+d+", por proteger (Definições → Serviços)")
+		case seen && old != now[d] && name != "":
+			changed = true
+			a.alert(name, "o docker-compose.yml mudou no espelho: as imagens e o que o TNAS precisa são verificados outra vez")
+		}
+	}
+	for _, d := range sortedKeys(st.MirrorSeen) {
+		if _, ok := now[d]; !ok && owner[d] != "" && owner[d] != "npm" {
+			a.alert(owner[d], "a pasta "+d+" já não está no espelho (ou perdeu o docker-compose.yml): o failover deste serviço não arranca")
+		}
+	}
+	st.MirrorSeen = now
+	st.MirrorNew = slices.DeleteFunc(st.MirrorNew, func(d string) bool { _, ok := now[d]; return !ok || owner[d] != "" })
+	if changed {
+		go a.scanImages()
+	}
+}
+
+func sortedKeys(m map[string]int64) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// snapshotTest is a failover's first step, tried: the mirror is a btrfs
+// subvolume and the snapshots folder is on its volume.
+func (a *Agent) snapshotTest(c Config) error {
+	test := filepath.Join(c.Paths.SnapshotsDir, "failover-teste-"+time.Now().Format("20060102-150405"))
+	_ = os.Mkdir(c.Paths.SnapshotsDir, 0o755) // one level: under a parent that exists
+	if err := a.sys.Run("btrfs", "subvolume", "snapshot", c.Paths.MirrorSubvol, test); err != nil {
+		return fmt.Errorf("snapshot de teste do espelho falhou (tem de ser um subvolume btrfs, no mesmo volume da pasta dos snapshots): %w", err)
+	}
+	return a.sys.Run("btrfs", "subvolume", "delete", test)
+}
+
+// Verdict is the answer to "if the server fell now, would the failover
+// work?", checked after every scan of the images: every problem found.
+type Verdict struct {
+	At       time.Time `json:"at,omitzero"`
+	Problems []string  `json:"problems,omitempty"`
+}
+
+// checkReady makes the verdict, outside mu: a token check against the
+// Technitium and a test snapshot. A problem that was not there the last
+// time is emailed; all gone is an event.
+func (a *Agent) checkReady() {
+	a.mu.Lock()
+	c, stacks := a.cfg, maps.Clone(a.st.Images) // read without mu below: a service removed meanwhile edits the map
+	stale, changed := a.st.MirrorStale, a.st.MirrorChanged
+	a.mu.Unlock()
+
+	var p []string
+	tok, _ := os.ReadFile(c.DNS.TokenFile)
+	if err := testToken(a.sys, c.DNS.APIURL, c.DNS.Zone, strings.TrimSpace(string(tok))); err != nil {
+		p = append(p, "o token do Technitium não serve: "+err.Error())
+	}
+	if err := a.snapshotTest(c); err != nil {
+		p = append(p, err.Error())
+	}
+	if stale {
+		p = append(p, "o espelho não muda desde "+changed.Format("02/01"))
+	}
+	names := []string{"npm"}
+	for _, sv := range c.Services {
+		names = append(names, sv.Name)
+	}
+	for _, n := range names {
+		st, ok := stacks[n]
+		if !ok {
+			continue // not scanned yet
+		}
+		if st.Err != "" {
+			p = append(p, n+": o compose não se lê: "+st.Err)
+		}
+		if m := missingImages(st); m > 0 {
+			p = append(p, fmt.Sprintf("%s: %d %s em falta no TNAS (precisaria da internet)", n, m, map[bool]string{true: "imagem", false: "imagens"}[m == 1]))
+		}
+		for _, note := range st.Notes {
+			p = append(p, n+": "+note)
+		}
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.now = time.Now()
+	old := a.st.Verdict.Problems
+	a.st.Verdict = Verdict{a.now, p}
+	var fresh []string
+	for _, x := range p {
+		if !slices.Contains(old, x) {
+			fresh = append(fresh, x)
+		}
+	}
+	switch {
+	case fresh != nil:
+		a.alert("", "problemas para um failover: "+strings.Join(fresh, "; "))
+	case p == nil && old != nil:
+		a.event("", "pronto para failover outra vez")
+	}
+	a.save()
+}
+
+func missingImages(st Stack) int {
+	n := 0
+	for _, im := range st.Images {
+		if !im.Present {
+			n++
+		}
+	}
+	return n
+}

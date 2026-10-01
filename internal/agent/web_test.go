@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -30,7 +32,7 @@ func TestUI(t *testing.T) {
 	a, _ := setup(t)
 	srv := httptest.NewServer(a.Handler())
 	defer srv.Close()
-	if v := string(*a.view.Load()); strings.Contains(v, "0001-01-01") {
+	if v := string(a.view.Load().raw); strings.Contains(v, "0001-01-01") {
 		t.Fatalf("estado da interface: hora zero: %s", v)
 	}
 
@@ -172,7 +174,7 @@ func TestDNSToken(t *testing.T) {
 	if fi, _ := os.Stat(tokFile); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("permissões do token: %v", fi.Mode().Perm())
 	}
-	if v := string(*a.view.Load()); !strings.Contains(v, `"dns_token":true`) || strings.Contains(v, "novo") {
+	if v := string(a.view.Load().raw); !strings.Contains(v, `"dns_token":true`) || strings.Contains(v, "novo") {
 		t.Fatalf("o estado tem de dizer que há token, sem o mostrar: %s", v)
 	}
 }
@@ -429,5 +431,40 @@ func TestFirstAccount(t *testing.T) {
 	_ = resp.Body.Close()
 	if got := resp.Header.Get("Location"); got != "/login?erro=fora" || fileExists(late.userPath) {
 		t.Fatalf("fora da janela: %q", got)
+	}
+}
+
+// The page goes gzipped to a browser that takes it, and a reload of an
+// unchanged page is a 304; the status goes gzipped too.
+func TestPageGzipAndETag(t *testing.T) {
+	a, _ := setup(t)
+	get := func(path string, h map[string]string) *httptest.ResponseRecorder {
+		r := withSession(a, httptest.NewRequest(http.MethodGet, path, nil))
+		for k, v := range h {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, r)
+		return w
+	}
+	w := get("/", map[string]string{"Accept-Encoding": "gzip, br"})
+	if w.Code != 200 || w.Header().Get("Content-Encoding") != "gzip" || w.Body.Len() >= len(indexHTML)/2 || w.Header().Get("ETag") == "" {
+		t.Fatalf("página: %d %v, %d bytes", w.Code, w.Header(), w.Body.Len())
+	}
+	zr, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(zr); !bytes.Equal(b, indexHTML) {
+		t.Fatal("o gzip não é a página")
+	}
+	if w := get("/", map[string]string{"If-None-Match": indexETag}); w.Code != http.StatusNotModified || w.Body.Len() != 0 {
+		t.Fatalf("recarregar sem mudanças: %d, %d bytes", w.Code, w.Body.Len())
+	}
+	if w := get("/", nil); w.Header().Get("Content-Encoding") != "" || !bytes.Equal(w.Body.Bytes(), indexHTML) {
+		t.Fatal("sem gzip pedido, a página vai como está")
+	}
+	if w := get("/api/status", map[string]string{"Accept-Encoding": "gzip"}); w.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("status sem gzip: %v", w.Header())
 	}
 }

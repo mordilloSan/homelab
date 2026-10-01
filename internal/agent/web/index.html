@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Failover</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1b2635">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232052c2'/%3E%3Cpath fill='%23fff' transform='translate(2.4 2.4) scale(.8)' d='m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z'/%3E%3C/svg%3E">
 <style>
 /* Tokens follow LinuxIO (frontend/src/theme): dark variant by default, its light variant when asked. */
@@ -272,7 +274,10 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .pills > * { margin: 4px; vertical-align: middle; line-height: 1.5; }
 .pills .empty { display: inline-block; line-height: 32px; }
 /* dragging a service to the other box: a copy follows the pointer, the box it may go to lights up */
-.node .pill { touch-action: none; } /* a touch on a pill drags it rather than scroll */
+/* a finger scrolls over a pill; held for half a second, it drags it */
+.node .pill { -webkit-touch-callout: none; user-select: none; }
+.steps .step-now { color: var(--warning); }
+.steps .step-now .dot { width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
 .pill.dragging { opacity: .35; }
 .pill-ghost { position: fixed; z-index: 30; pointer-events: none; margin: 0; box-shadow: 0 12px 28px -10px rgba(0,0,0,.6);
   background: var(--paper) !important; transform: rotate(-2deg); }
@@ -499,6 +504,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 
   <section class="page" id="page-overview">
   <div class="banner" id="banner" role="alert" hidden><span data-icon="alert"></span><div id="bannerText"></div></div>
+  <div class="banner" id="mirrorBanner" style="--c:var(--info)" hidden><span data-icon="layers"></span><div id="mirrorText"></div></div>
   <div class="banner" id="setupBanner" style="--c:var(--info)" hidden><span data-icon="wrench"></span>
     <div>A configuração inicial ainda não está concluída. <a href="#/assistente">Continuar o assistente</a></div></div>
 
@@ -673,17 +679,17 @@ function describe(s) {
       if (!s.fail_since) return {text: 'Em falha no servidor.', tone: 'warning'};
       const e = minsSince(s.fail_since), left = s.wait_min - e;
       if (left > 0) return {text: `Em falha no servidor há ${dur(e)}. O failover começa daqui a ${dur(left)}.`, pct: e / s.wait_min, tone: 'warning'};
-      return {text: st.mode === 'auto' ? 'Em falha no servidor. O failover começa na próxima verificação.'
+      return {text: st.mode === 'auto' ? `Em falha no servidor. O failover começa na próxima verificação.`
         : `Em falha há ${dur(e)}. Em modo automático o failover já teria começado.`, pct: 1, tone: 'warning'};
     }
     case 'FAILING_OVER':
-      return {text: sentence(s.msg) || 'A arrancar a cópia no TNAS.', pct: minsSince(s.since) / st.start_timeout_min, tone: 'warning'};
+      return {text: sentence(s.msg) || `${nextStep(s)}.`, pct: minsSince(s.since) / st.start_timeout_min, tone: 'warning'};
     case 'ACTIVE': {
       if (s.forced) return {text: 'Failover forçado: fica no TNAS até Forçar regresso (ou até o arrastares para o servidor).'};
       if (!s.server_ok) return {text: 'A servir a partir do TNAS. Ainda não responde no servidor.'};
       const e = s.ok_since ? minsSince(s.ok_since) : 0, left = s.stability_min - e;
       if (left > 0) return {text: `Voltou a responder no servidor há ${dur(e)}. O regresso começa daqui a ${dur(left)}.`, pct: e / s.stability_min};
-      return {text: st.mode === 'auto' ? 'Estável no servidor. O regresso começa na próxima verificação.'
+      return {text: st.mode === 'auto' ? `Estável no servidor. O regresso começa na próxima verificação.`
         : 'Estável no servidor. Em modo automático o regresso já teria começado.', pct: 1};
     }
     case 'RETURNING':
@@ -727,8 +733,9 @@ function imageList(name) {
       <span class="${i.present ? 'ok-text' : 'bad-text'}">${icon(i.present ? 'check' : 'alert')}</span>
       <span class="grow mono" title="${esc(i.ref)}">${esc(i.ref)}</span>
       ${i.present ? `<span class="side">${bytes(i.size)}</span><span class="side" title="Data da imagem">${day(i.created)}</span>`
-        : '<span class="side bad-text">Em falta</span>'}</li>`).join('')}</ul>`;
+        : '<span class="side bad-text">Em falta</span>'}</li>`).join('')}</ul>${notesHtml(stack.notes)}`;
 }
+const notesHtml = notes => notes?.length ? `<ul class="checks">${notes.map(n => `<li class="warn-text">${icon('alert')}<span>${esc(sentence(n))}</span></li>`).join('')}</ul>` : '';
 
 function imagesMeta() {
   const c = imgCount(allStacks());
@@ -738,13 +745,51 @@ function imagesMeta() {
   return {icon: 'docker', text: `${plural(c.present, 'imagem pronta', 'imagens prontas')} para o failover, ${bytes(c.size)}`};
 }
 
+// "If the server fell now, would the failover work?", checked after every image scan.
+function readyMeta() {
+  const v = st.verdict || {};
+  if (!v.at) return null;
+  const p = v.problems || [];
+  return p.length ? {icon: 'alert', warn: true, text: `${plural(p.length, 'problema', 'problemas')} para um failover`, title: p.join('\n')}
+    : {icon: 'check', text: `Pronto para failover · verificado ${new Date(v.at).toDateString() === new Date().toDateString() ? `às ${clock(v.at)}` : ago(v.at)}`};
+}
+// When the TOS backup last wrote to the mirror: a failover starts from it.
+function mirrorMeta() {
+  if (!st.mirror_changed) return null;
+  return st.mirror_stale ? {icon: 'layers', warn: true, text: `Espelho parado desde ${day(st.mirror_changed)}: o backup do TOS parou?`}
+    : {icon: 'layers', text: `Espelho: última mudança ${ago(st.mirror_changed)}`, cls: 'sm-hide'};
+}
+
+// A failover's steps, as the agent records them.
+const STEPS = {'início': 'Início', NPM: 'NPM do TNAS arrancado', snapshot: 'Snapshot do espelho', imagens: 'Imagens descarregadas', arranque: 'Cópia arrancada',
+  resposta: 'Cópia a responder pelo NPM do TNAS', DNS: 'DNS a apontar para o TNAS'};
+const secsTxt = n => n < 60 ? `${n} s` : `${Math.floor(n / 60)} min ${n % 60} s`;
+// what the failover is doing now, from its last finished step
+function nextStep(s) {
+  if (/descarregar/.test(s.msg || '')) return sentence(s.msg).replace(/\.$/, '');
+  switch ((s.steps || []).at(-1)?.name) {
+    case 'snapshot': case 'imagens': return 'A arrancar a cópia';
+    case 'NPM': return 'A fazer o snapshot do espelho';
+    case 'arranque': return 'À espera que a cópia responda';
+    case 'resposta': return 'A mudar o DNS';
+    default: return 'A preparar o failover';
+  }
+}
+function stepsHtml(s) {
+  const steps = s.steps || [];
+  const rows = steps.map((x, i) => `<li><span class="ok-text">${icon('check')}</span><span class="grow">${esc(STEPS[x.name] || x.name)}</span>
+    <span class="side">${esc(clock(x.at))}${i ? ` · ${secsTxt(Math.round((Date.parse(x.at) - Date.parse(steps[i - 1].at)) / 1000))}` : ''}</span></li>`);
+  if (s.state === 'FAILING_OVER') rows.push(`<li class="step-now"><span class="dot"></span><span class="grow">${esc(nextStep(s))}…</span></li>`);
+  return `<ul class="list steps">${rows.join('')}</ul>`;
+}
+
 const pill = s => {
   const S = look(s);
   // failing on the server: a ring fills up until the failover starts
   const ring = s.state === 'NORMAL' && s.fail_since && !s.server_ok
     ? `<span class="ring" style="--p:${Math.min(100, Math.round(minsSince(s.fail_since) / s.wait_min * 100))}"></span>` : '';
   return `<button class="pill ${S.busy ? 'busy' : ''} ${fine(s) ? 'quiet' : ''}" data-panel="svc" data-svc="${esc(s.name)}" data-flip="${esc(s.name)}"
-    style="--c:${S.c}" title="${esc(S.label)}. Ver detalhes">${svcIcon(s.name)}${esc(s.name)}${S.busy ? '<span class="dot"></span>' : ring}</button>`;
+    style="--c:${S.c}" title="${esc(S.label)}${s.state === 'FAILING_OVER' ? `: ${esc(nextStep(s))}` : ''}. Ver detalhes">${svcIcon(s.name)}${esc(s.name)}${S.busy ? '<span class="dot"></span>' : ring}</button>`;
 };
 
 // Heartbeat bars: the last checks of the server's NPM or of one service, newest on the right.
@@ -811,7 +856,7 @@ function renderTopology() {
       <span class="node-icon st st-${health.s}" title="${esc(health.why)}">${icon(ic)}</span>
       <span class="node-id"><span class="node-title">${title}</span><span class="mono muted">${esc(ip)}</span></span>
       <span class="node-end">${chipHtml}</span></button>
-    <div class="node-meta ${meta.warn ? 'warn' : ''} ${meta.cls || ''}">${icon(meta.icon)}<span>${esc(meta.text)}</span></div>
+    ${[meta].flat().filter(Boolean).map(m => `<div class="node-meta ${m.warn ? 'warn' : ''} ${m.cls || ''}" ${m.title ? `title="${esc(m.title)}"` : ''}>${icon(m.icon)}<span>${esc(m.text)}</span></div>`).join('')}
     <div class="pills" data-drop="${kind}">${list.length ? list.map(pill).join(' ') : `<span class="empty">${empty}</span>`}</div>
     ${kind === 'server' ? `<div class="node-beats">${beatsBlock('npm')}</div>` : ''}`;
 
@@ -819,7 +864,7 @@ function renderTopology() {
   const before = new Map([...document.querySelectorAll('.topo [data-flip]')].map(el => [el.dataset.flip, el.getBoundingClientRect()]));
   paint('nodeServer', node('server', 'server', 'Servidor', st.server_ip, serverChip(),
     {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`, cls: 'sm-hide'}, at.server, 'Nenhum serviço no servidor', serverHealth()));
-  paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), imagesMeta(), at.tnas, 'Nenhuma cópia a servir', tnasHealth()));
+  paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), [readyMeta(), imagesMeta(), mirrorMeta()], at.tnas, 'Nenhuma cópia a servir', tnasHealth()));
   const lane = $('lane'), back = at.moving.length > 0 && at.moving.every(s => s.state === 'RETURNING') && !at.tnas.length;
   // the link shows the checks (probePulse marks each one) and services on their way; client traffic is on the wires
   lane.classList.toggle('active', at.moving.length > 0 || st.router_ok);
@@ -944,6 +989,19 @@ function renderGlobal() {
   $('banner').style.setProperty('--c', st.router_ok ? 'var(--warning)' : 'var(--error)');
   $('bannerText').textContent = banner;
   $('setupBanner').hidden = !st.setup_pending;
+  const mn = st.mirror_new || [];
+  $('mirrorBanner').hidden = !mn.length;
+  paint('mirrorText', mn.length ? `${mn.length === 1 ? 'Pasta nova' : `${mn.length} pastas novas`} no espelho: ${mn.map(mono).join(', ')}.
+    <a href="#/definicoes/servicos" data-mirror-seen>Proteger em Definições → Serviços</a> · <a href="#/" data-mirror-seen>Dispensar</a>` : '');
+  // the tab and its icon say the state, seen from the list of tabs
+  const away = st.services.filter(x => x.state !== 'NORMAL'), err = away.some(x => x.state === 'ERROR');
+  const nErr = away.filter(x => x.state === 'ERROR').length, nAway = away.length - nErr;
+  document.title = away.length ? `● ${[nErr && `${nErr} com erro`, nAway && `${nAway} em failover`].filter(Boolean).join(' · ')} · Failover` : 'Failover';
+  const fav = err ? '%23f54b3f' : away.length ? '%23e3a008' : '%232052c2';
+  if (fav !== painted.fav) {
+    painted.fav = fav;
+    document.querySelector('link[rel=icon]').href = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='${fav}'/%3E%3Cpath fill='%23fff' transform='translate(2.4 2.4) scale(.8)' d='m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z'/%3E%3C/svg%3E`;
+  }
 }
 
 function maintSwitch(s) {
@@ -1112,8 +1170,13 @@ function tnasPanel() {
   const stacks = allStacks().map(name => `<div class="stack"><div class="stack-name">${svcIcon(name)}${name === 'npm' ? 'NPM do TNAS' : esc(name)}</div>${imageList(name)}</div>`).join('');
   return {
     head: `<span class="node-icon st st-${tnasHealth().s}" title="${esc(tnasHealth().why)}">${icon('nas')}</span><div class="node-id"><h2 id="panelTitle">TNAS</h2>${mono(st.tnas_ip)}</div>${tnasChip()}`,
-    body: sec('Estado', kv([
+    body: (st.verdict?.at ? sec('Pronto para failover', (st.verdict.problems?.length
+        ? notesHtml(st.verdict.problems) : `<p class="ok-text">${icon('check')} Nada em falta.</p>`)
+        + `<p class="note-text">Verificado às ${esc(clock(st.verdict.at))}: o token do Technitium, um snapshot de teste do espelho, as imagens e o que o TNAS precisa para cada compose (redes externas, portas livres).</p>`) : '')
+      + sec('Estado', kv([
         ['Agente', `<span class="ok-text">A correr</span>, versão ${mono(st.version)}. É ele que serve esta página`],
+        st.mirror_changed && ['Espelho', st.mirror_stale ? `<span class="warn-text">Parado desde ${esc(when(st.mirror_changed))}: o backup do TOS parou?</span>`
+          : `Última mudança ${esc(ago(st.mirror_changed))}`],
         ['IP da LAN', st.tnas_up ? `<span class="ok-text">Responde</span> ${mono(st.tnas_ip)}` : `<span class="bad-text">Não responde</span> ${mono(st.tnas_ip)}`],
         ['Router', st.router_ok ? `<span class="ok-text">Acessível</span> ${mono(st.router_ip)}` : `<span class="bad-text">Inacessível</span> ${mono(st.router_ip)}`],
       ]) + '<p class="note-text">O TNAS está na LAN quando o próprio IP responde e chega ao router. Um ping ao próprio IP não sai da máquina: sozinho só confirma que o IP está ativo.</p>')
@@ -1166,7 +1229,7 @@ function svcEditPanel() {
   const pre = !s && panel.prefill ? discOf(panel.prefill) : null;
   const v = s || {name: pre?.name || '', dir: pre?.dir || '', host: pre?.host || '', wait_min: 2, stability_min: 2, icon: '', require_free_ip: pre?.require_free_ip || ''};
   if (pre && !panel.data.override) panel.data.override = pre.override_yaml || '';
-  const home = isNew || s.state === 'NORMAL';
+  const home = isNew || atHome(s);
   const dirs = panel.data.dirs.map(d => d.dir);
   if (v.dir && !dirs.includes(v.dir)) dirs.unshift(v.dir);
   const field = (k, l, input, h = '') => `<label class="set-field" data-k="${k}"><span class="set-label">${l}</span>
@@ -1194,6 +1257,7 @@ function svcEditPanel() {
       ${field('stability_min', 'Estabilidade antes do regresso', `<select name="stability_min">${optMinutes(v.stability_min, 0)}</select>`)}
     </fieldset></div>
     <p class="note-text" id="svcDisc">${pre ? 'Preenchido com o que a descoberta encontrou: revê antes de adicionar.' : ''}</p>
+    ${notesHtml(discOf(v.dir)?.notes)}
     <p class="bad-text sec-err" id="svcErr" role="alert"></p>
   </form>`;
   const foot = `${isNew ? '' : `<button type="button" class="btn" style="--b:var(--error)" data-remove="${esc(s.name)}" ${home ? '' : 'disabled title="Só com o serviço no servidor"'}>Remover serviço</button>`}
@@ -1288,6 +1352,7 @@ function svcPanel(s) {
         ['DNS', s.dns ? `${mono(s.host)} aponta para o TNAS` : 'Sem mudança'],
         s.since && ['Neste estado desde', esc(when(s.since))],
       ])) : '')
+      + (s.steps?.length ? sec(s.state === 'FAILING_OVER' ? 'Failover em curso' : 'Último failover', stepsHtml(s)) : '')
       + sec('Últimas verificações no servidor', beatsBlock(s.name))
       + sec('Imagens', imageList(s.name))
       + sec('Eventos', events.length ? `<ol class="timeline">${events.map(e => evItem(e, false, false)).join('')}</ol>` : '<p class="note-text">Ainda sem eventos deste serviço.</p>'),
@@ -1319,7 +1384,8 @@ const SECTIONS = [
     {k: 'paths.mirror_root', l: 'Pasta dentro do espelho'},
     {k: 'paths.snapshots_dir', l: 'Pasta dos snapshots'},
     {k: 'paths.overrides_dir', l: 'Pasta dos overrides'},
-    {k: 'npm.dir', l: 'Pasta do NPM no espelho'}]},
+    {k: 'npm.dir', l: 'Pasta do NPM no espelho'},
+    {k: 'paths.mirror_stale_days', l: 'Avisar do espelho parado ao fim de', u: 'dias', n: 0, h: 'Sem mudanças no espelho durante estes dias: o backup do TOS parou? 0: 2 dias.'}]},
   {id: 'avisos', title: 'Avisos por email', fields: [
     {k: 'email.host', l: 'Servidor SMTP', h: 'Gmail: smtp.gmail.com · Outlook: smtp-mail.outlook.com. Vazio desliga os avisos.'},
     {k: 'email.port', l: 'Porta', n: 1},
@@ -1335,7 +1401,9 @@ const SECTIONS = [
 ];
 const CHECKED = ['rede', 'dns', 'caminhos'];
 const secChecks = {}; // section → the checks shown after it was saved
-const allHome = () => st.services.every(s => s.state === 'NORMAL') && !st.tnas_npm?.snapshot;
+// nothing of it runs on the TNAS: a failed failover counts once its copy is gone (as home() in Go)
+const atHome = s => s.state === 'NORMAL' || (s.state === 'ERROR' && !s.snapshot && !s.dns);
+const allHome = () => st.services.every(atHome) && !st.tnas_npm?.snapshot;
 
 function fieldHtml(fd, v = st.settings?.[fd.k]) {
   const input = fd.o ? `<select name="${fd.k}">${fd.o.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
@@ -1886,12 +1954,16 @@ async function readErr(r) {
 // The session ended (agent restarted, idle for a week, password changed elsewhere).
 const toLogin = r => { if (r.status === 401) location.href = 'login'; return r; };
 
+let pageVersion = '';
 async function refresh() {
   try {
     const r = toLogin(await fetch('api/status', {cache: 'no-store'}));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const first = !st;
     st = await r.json();
+    // the agent was updated: this page is its old one, load the new
+    if (pageVersion && st.version !== pageVersion) { location.reload(); return; }
+    pageVersion = st.version;
     lastOk = Date.now();
     const live = $('live');
     live.classList.remove('ping');
@@ -1918,6 +1990,13 @@ function tickLive() {
 }
 
 document.addEventListener('click', async e => {
+  if (e.target.closest('[data-mirror-seen]')) {
+    forgetDiscovery(); // a new folder: what was discovered is stale
+    try {
+      toLogin(await fetch('api/mirror/seen', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}));
+    } catch {} // the hint comes back with the next status; nothing lost
+    refresh();
+  }
   const open = e.target.closest('[data-panel]');
   if (open) { openPanel(open.dataset.panel, open.dataset.svc, open.dataset.prefill); return; }
   if (e.target.closest('[data-pw]')) { openPw(); return; }
@@ -1942,35 +2021,64 @@ async function forceAction(svc, act) {
 // to the server a return, with the same confirmation. A copy follows the
 // pointer; the box it may go to lights up. A plain click still opens the panel.
 let drag = null, dragClick = false;
+// With a finger the drag starts after holding the pill for half a second (a
+// short buzz says so); a finger that moves first is a scroll.
 document.addEventListener('pointerdown', e => {
   const p = e.target.closest('.node .pill');
   const s = p && st.services.find(x => x.name === p.dataset.svc);
   if (!s || e.button !== 0) return;
-  drag = {p, s, from: p.closest('[data-drop]').dataset.drop, x: e.clientX, y: e.clientY};
+  drag = {p, s, from: p.closest('[data-drop]').dataset.drop, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch'};
+  if (drag.touch) {
+    const d = drag;
+    d.timer = setTimeout(() => {
+      if (drag !== d) return;
+      d.held = true;
+      navigator.vibrate?.(15);
+      addEventListener('touchmove', noScroll, {passive: false}); // only now: a listener like this slows every scroll
+      startGhost(d.x, d.y);
+    }, 450);
+  }
 });
+// no scroll while a held pill is dragged (the listener must not be passive to say so)
+const noScroll = e => e.preventDefault();
+function startGhost(x, y) {
+  const r = drag.p.getBoundingClientRect(), g = drag.p.cloneNode(true);
+  g.classList.add('pill-ghost');
+  Object.assign(g.style, {left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`});
+  document.body.append(g);
+  drag.p.classList.add('dragging');
+  Object.assign(drag, {ghost: g, dx: drag.x - r.left, dy: drag.y - r.top, home: r,
+    act: drag.from === 'server' ? 'failover' : 'return', to: $(drag.from === 'server' ? 'nodeTnas' : 'nodeServer')});
+  drag.ok = drag.act === 'failover' ? canFail(drag.s) : canReturn(drag.s);
+  drag.to.classList.toggle('drop-ok', drag.ok);
+  moveGhost(x, y);
+}
+function moveGhost(x, y) {
+  drag.ghost.style.left = `${x - drag.dx}px`;
+  drag.ghost.style.top = `${y - drag.dy}px`;
+  const t = drag.to.getBoundingClientRect();
+  drag.over = x >= t.left && x <= t.right && y >= t.top && y <= t.bottom;
+  drag.to.classList.toggle('over', drag.over && drag.ok);
+}
 document.addEventListener('pointermove', e => {
   if (!drag) return;
-  if (!drag.ghost) {
-    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
-    const r = drag.p.getBoundingClientRect(), g = drag.p.cloneNode(true);
-    g.classList.add('pill-ghost');
-    Object.assign(g.style, {left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`});
-    document.body.append(g);
-    drag.p.classList.add('dragging');
-    Object.assign(drag, {ghost: g, dx: drag.x - r.left, dy: drag.y - r.top, home: r,
-      act: drag.from === 'server' ? 'failover' : 'return', to: $(drag.from === 'server' ? 'nodeTnas' : 'nodeServer')});
-    drag.ok = drag.act === 'failover' ? canFail(drag.s) : canReturn(drag.s);
-    drag.to.classList.toggle('drop-ok', drag.ok);
+  const moved = Math.hypot(e.clientX - drag.x, e.clientY - drag.y);
+  if (drag.touch && !drag.held) { // moved before the hold: a scroll, not a drag
+    if (moved > 8) { clearTimeout(drag.timer); drag = null; }
+    return;
   }
-  drag.ghost.style.left = `${e.clientX - drag.dx}px`;
-  drag.ghost.style.top = `${e.clientY - drag.dy}px`;
-  const t = drag.to.getBoundingClientRect();
-  drag.over = e.clientX >= t.left && e.clientX <= t.right && e.clientY >= t.top && e.clientY <= t.bottom;
-  drag.to.classList.toggle('over', drag.over && drag.ok);
+  if (!drag.ghost) {
+    if (moved < 6) return;
+    startGhost(e.clientX, e.clientY);
+    return;
+  }
+  moveGhost(e.clientX, e.clientY);
 });
 const endDrag = async e => {
   const d = drag;
   drag = null;
+  clearTimeout(d?.timer);
+  removeEventListener('touchmove', noScroll);
   if (!d?.ghost) return;
   dragClick = true; // a click right after is the drop, not a request for the panel
   setTimeout(() => { dragClick = false; }, 0);
@@ -2124,9 +2232,12 @@ addEventListener('hashchange', route);
 route();
 
 new ResizeObserver(() => st && renderWires()).observe($('topo'));
+// Nothing is asked while the page is hidden (another tab, the phone locked);
+// back in view it asks at once.
 refresh();
-setInterval(refresh, 5000);
-setInterval(tickLive, 1000);
+setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+setInterval(() => { if (!document.hidden) tickLive(); }, 1000);
+addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 </script>
 </body>
 </html>

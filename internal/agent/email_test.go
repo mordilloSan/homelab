@@ -223,7 +223,7 @@ func TestEmailSettings(t *testing.T) {
 	if code, _ := postTo(t, a.postSection, `{"section":"avisos","values":{"email.password":" nova-app-pass "}}`); code != 204 || a.cfg.Email.Password != "nova-app-pass" {
 		t.Fatal("não substituiu")
 	}
-	if v := string(*a.view.Load()); strings.Contains(v, "nova-app-pass") || !strings.Contains(v, `"email.password":true`) {
+	if v := string(a.view.Load().raw); strings.Contains(v, "nova-app-pass") || !strings.Contains(v, `"email.password":true`) {
 		t.Fatalf("o estado mostra a password: %s", v)
 	}
 	for body, field := range map[string]string{
@@ -243,4 +243,32 @@ func TestEmailSettings(t *testing.T) {
 		t.Fatalf("falha do teste: %d %s", code, body)
 	}
 	_ = time.Second
+}
+
+// The subject tells the incident: how many went to the TNAS and when, how
+// many came back and after how long, and how many other alerts came along.
+func TestAlertSubject(t *testing.T) {
+	at := time.Date(2026, 9, 30, 3, 12, 0, 0, time.Local)
+	fo := func(svc string) alertItem { return alertItem{T: at, Svc: svc, Msg: msgFailover} }
+	back := func(svc string, d time.Duration) alertItem {
+		return alertItem{T: at, Svc: svc, Msg: msgBack + " após " + fmtDur(d) + " no TNAS", OnTNAS: d}
+	}
+	for want, batch := range map[string][]alertItem{
+		"[Failover] vaultwarden em failover no TNAS às 03:12":               {fo("vaultwarden")},
+		"[Failover] 3 serviços em failover no TNAS às 03:12":                {fo("a"), fo("b"), fo("c")},
+		"[Failover] 2 serviços em failover no TNAS às 03:12 (+1 aviso)":     {fo("a"), {T: at, Msg: "router inacessível"}, fo("b")},
+		"[Failover] 2 serviços de volta ao servidor após 6 h 2 min no TNAS": {back("a", 6*time.Hour), back("b", 6*time.Hour+2*time.Minute)},
+		"[Failover] immich de volta ao servidor após 1 dia 3 h no TNAS":     {back("immich", 27*time.Hour)},
+		"[Failover] router inacessível: sem ações":                          {{T: at, Msg: "router inacessível: sem ações"}},
+		"[Failover] unifi: ERRO: IP ocupado (+1 aviso)":                     {{T: at, Svc: "unifi", Msg: "ERRO: IP ocupado"}, {T: at, Msg: "x"}},
+	} {
+		if got := alertSubject(batch); got != want {
+			t.Errorf("%q, queria %q", got, want)
+		}
+	}
+	for d, want := range map[time.Duration]string{20 * time.Second: "menos de 1 min", 45 * time.Minute: "45 min", 2 * time.Hour: "2 h", 49 * time.Hour: "2 dias 1 h"} {
+		if got := fmtDur(d); got != want {
+			t.Errorf("%v: %q, queria %q", d, got, want)
+		}
+	}
 }

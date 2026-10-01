@@ -79,7 +79,7 @@ func TestStatusEvents(t *testing.T) {
 	}
 	a.publish()
 	var v struct{ Events []Event }
-	if err := json.Unmarshal(*a.view.Load(), &v); err != nil || len(v.Events) != statusEvents {
+	if err := json.Unmarshal(a.view.Load().raw, &v); err != nil || len(v.Events) != statusEvents {
 		t.Fatalf("eventos no estado: %d (%v)", len(v.Events), err)
 	}
 }
