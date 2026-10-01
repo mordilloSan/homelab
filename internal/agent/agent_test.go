@@ -33,6 +33,7 @@ type fake struct {
 	getErr   map[string]error  // URL prefix → Get fails with this
 	left     map[string]string // compose project → ids docker ps / volume ls still list
 	noNet    map[string]bool   // ip → its DNS resolver does not reach the internet
+	noDNS    map[string]bool   // ip → its DNS server does not answer at all
 	bodies   map[string][]byte // exact URL → what Get answers
 	mails    []Mail            // every email sent
 	failMail error             // SendMail fails with this
@@ -62,6 +63,15 @@ func (f *fake) PortFree(proto, addr string) error {
 	defer f.mu.Unlock()
 	if f.busy[proto+" "+addr] {
 		return errors.New("address already in use")
+	}
+	return nil
+}
+
+func (f *fake) Answers(ip, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.noDNS[ip] {
+		return errors.New("i/o timeout")
 	}
 	return nil
 }
@@ -749,6 +759,22 @@ func TestInternetPerBox(t *testing.T) {
 	a.Tick(t0.Add(time.Minute))
 	if a.st.ServerNetOK {
 		t.Fatal("com o servidor em baixo, a internet dele mudou")
+	}
+}
+
+// Each member of the DNS cluster is asked for its own zone: one that does
+// not answer is an event, and so is its return.
+func TestDNSCluster(t *testing.T) {
+	a, f := setup(t)
+	f.noDNS = map[string]bool{a.cfg.TNASIP: true}
+	a.Tick(t0)
+	if a.st.TNASDNSOK || !a.st.ServerDNSOK || !hasEvent(a, "Technitium do TNAS não responde") {
+		t.Fatalf("Technitium do TNAS em baixo: %v %v %v", a.st.TNASDNSOK, a.st.ServerDNSOK, a.events)
+	}
+	f.noDNS = nil
+	a.Tick(t0.Add(time.Minute))
+	if !a.st.TNASDNSOK || !hasEvent(a, "Technitium do TNAS responde outra vez") {
+		t.Fatalf("de volta: %v", a.st.TNASDNSOK)
 	}
 }
 

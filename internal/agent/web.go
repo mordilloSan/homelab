@@ -98,6 +98,7 @@ func (a *Agent) Handler() http.Handler {
 	mux.HandleFunc("GET /api/service/override", a.getServiceOverride)
 	mux.HandleFunc("POST /api/service", a.postService)
 	mux.HandleFunc("POST /api/service/remove", a.postServiceRemove)
+	mux.HandleFunc("POST /api/mirror/ignore", a.postMirrorIgnore)
 	mux.HandleFunc("POST /api/maintenance", a.postMaintenance)
 	mux.HandleFunc("POST /api/action", a.postAction)
 	mux.HandleFunc("POST /api/password", a.postPassword)

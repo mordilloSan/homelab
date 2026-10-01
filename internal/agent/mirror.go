@@ -81,6 +81,9 @@ func (a *Agent) mirrorFolders() {
 	}
 	now := map[string]int64{}
 	for _, d := range append(mirrorDirs(root, c.NPM.Dir), c.NPM.Dir) {
+		if slices.Contains(c.Ignored, d) {
+			continue
+		}
 		if fi, err := os.Stat(filepath.Join(root, d, "docker-compose.yml")); err == nil {
 			now[d] = fi.ModTime().Unix()
 		}
@@ -107,7 +110,7 @@ func (a *Agent) mirrorFolders() {
 		}
 	}
 	for _, d := range sortedKeys(st.MirrorSeen) {
-		if _, ok := now[d]; !ok && owner[d] != "" && owner[d] != "npm" {
+		if _, ok := now[d]; !ok && owner[d] != "" && owner[d] != "npm" && !fileExists(filepath.Join(root, d, "docker-compose.yml")) { // a clustered one is left out, not gone
 			a.alert(owner[d], "a pasta "+d+" já não está no espelho (ou perdeu o docker-compose.yml): o failover deste serviço não arranca")
 		}
 	}

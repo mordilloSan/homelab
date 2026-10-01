@@ -295,6 +295,20 @@ func TestDiscover(t *testing.T) {
 	}
 }
 
+// An ignored folder is listed apart and never read: its compose, broken
+// here, gives no error.
+func TestDiscoverIgnored(t *testing.T) {
+	a, _ := discoverSetup(t)
+	a.cfg.Ignored = []string{"partido"}
+	i := slices.IndexFunc(a.discover().Services, func(s discoveredService) bool { return s.Dir == "partido" })
+	if i < 0 {
+		t.Fatal("a pasta ignorada desapareceu da descoberta")
+	}
+	if s := a.discover().Services[i]; !s.Ignored || s.Error != "" {
+		t.Fatalf("%+v", s)
+	}
+}
+
 // No route (no network yet) and no NPM: empty values, not errors.
 func TestDiscoverNothing(t *testing.T) {
 	a, _ := svcSetup(t)

@@ -63,6 +63,7 @@ type Config struct {
 		AlertAfterMin int    `yaml:"alert_after_min"`
 	} `yaml:"npm"`
 	Services    []Service `yaml:"services"`
+	Ignored     []string  `yaml:"ignored,omitempty"` // folders of the mirror the discovery and its watch leave out
 	Maintenance struct {
 		DefaultExpiryMin int `yaml:"default_expiry_min"`
 	} `yaml:"maintenance"`
@@ -312,6 +313,8 @@ type State struct {
 	RouterOK       bool              `json:"router_ok"`
 	TNASNetOK      bool              `json:"tnas_net_ok"`   // its Technitium reaches the internet
 	ServerNetOK    bool              `json:"server_net_ok"` // same for the server's; kept as it was while the server is down
+	TNASDNSOK      bool              `json:"tnas_dns_ok"`   // its Technitium answers, internet or not: a member of the cluster
+	ServerDNSOK    bool              `json:"server_dns_ok"` // same for the server's
 	TNASUp         bool              `json:"tnas_up"`       // its LAN IP answers; with RouterOK, it is on the LAN
 	ServerUp       bool              `json:"server_up"`     // NPM or ping answered; meaningless without the router
 	ServerNPMOK    bool              `json:"server_npm_ok"`
@@ -350,6 +353,7 @@ type System interface {
 	Check(host, ip string) error                        // https://host with the connection sent to ip (curl --resolve)
 	Get(url, bearer string) ([]byte, error)
 	Resolve(ip string) error            // the resolver at ip answers for a name from the internet
+	Answers(ip, zone string) error      // the DNS server at ip answers for its own zone
 	GetIcon(url string) ([]byte, error) // like Get, for the icons' CDN
 	SendMail(m Mail) error
 	PortFree(proto, addr string) error // nothing listens on addr of this host (the agent runs with its network)
@@ -406,7 +410,7 @@ type Agent struct {
 func NewAgent(cfg Config, cfgPath, statePath string, sys System) (*Agent, error) {
 	a := &Agent{cfg: cfg, cfgPath: cfgPath, statePath: statePath, started: time.Now(), wake: make(chan struct{}, 1), now: time.Now(), beats: map[string][]Beat{}, tnasSeen: true}
 	a.sys = progress{sys, a}
-	a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK = true, true, true
+	a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK = true, true, true, true, true
 	b, err := os.ReadFile(statePath)
 	switch {
 	case err == nil:
@@ -587,6 +591,7 @@ func (a *Agent) inMaint(s *SvcState) bool {
 type probe struct {
 	routerOK, npmOK, serverPing, tnasNPMOK bool
 	tnasNet, serverNet                     bool // each Technitium reaches the internet
+	tnasDNS, serverDNS                     bool // each Technitium answers
 	tnasPing                               bool // its own LAN IP is up (answered locally)
 	npmMs                                  int
 	svcOK                                  map[string]bool
@@ -634,6 +639,8 @@ func (a *Agent) probe() probe {
 	}
 	wg.Go(func() { p.tnasNet = a.sys.Resolve(c.TNASIP) == nil })
 	wg.Go(func() { p.serverNet = a.sys.Resolve(c.Server.IP) == nil })
+	wg.Go(func() { p.tnasDNS = a.sys.Answers(c.TNASIP, c.DNS.Zone) == nil })
+	wg.Go(func() { p.serverDNS = a.sys.Answers(c.Server.IP, c.DNS.Zone) == nil })
 	wg.Wait()
 	for i, sv := range c.Services {
 		p.svcOK[sv.Name], p.svcMs[sv.Name] = ok[i], ms[i]
@@ -727,9 +734,17 @@ func (a *Agent) evaluate(p probe) {
 			a.event("", map[bool]string{true: who + ": internet acessível", false: who + ": sem internet, o DNS não resolve nomes de fora"}[ok])
 		}
 	}
+	dnsSeen := func(was *bool, ok bool, who string) {
+		if ok != *was {
+			*was = ok
+			a.event("", map[bool]string{true: "Technitium do " + who + " responde outra vez", false: "Technitium do " + who + " não responde: o cluster DNS só tem o outro"}[ok])
+		}
+	}
 	netSeen(&st.TNASNetOK, p.tnasNet, "TNAS")
+	dnsSeen(&st.TNASDNSOK, p.tnasDNS, "TNAS")
 	if p.npmOK || p.serverPing { // a server that is down says nothing about its internet
 		netSeen(&st.ServerNetOK, p.serverNet, "servidor")
+		dnsSeen(&st.ServerDNSOK, p.serverDNS, "servidor")
 	}
 
 	known := a.serverNPM(p)
@@ -1532,6 +1547,8 @@ func (a *Agent) publish() {
 		RouterOK         bool      `json:"router_ok"`
 		TNASNetOK        bool      `json:"tnas_net_ok"`
 		ServerNetOK      bool      `json:"server_net_ok"`
+		TNASDNSOK        bool      `json:"tnas_dns_ok"`
+		ServerDNSOK      bool      `json:"server_dns_ok"`
 		TNASUp           bool      `json:"tnas_up"`
 		ServerUp         bool      `json:"server_up"`
 		ServerNPMOK      bool      `json:"server_npm_ok"`
@@ -1559,7 +1576,7 @@ func (a *Agent) publish() {
 		Verdict          Verdict   `json:"verdict"`
 	}{
 		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
-		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
+		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},

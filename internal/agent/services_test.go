@@ -28,6 +28,14 @@ func svcSetup(t *testing.T) (*Agent, *fake) {
 	if err := os.MkdirAll(filepath.Join(dir, "mirror", "homelab", "sem-compose"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// in a cluster on the server and the TNAS: never offered, never added
+	tech := filepath.Join(dir, "mirror", "homelab", "technitium")
+	if err := os.MkdirAll(tech, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tech, "docker-compose.yml"), []byte("services:\n  dns:\n    image: technitium/dns-server:latest\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	a.cfg.Paths.MirrorSubvol = filepath.Join(dir, "mirror")
 	a.cfg.Paths.MirrorRoot = "homelab"
 	a.cfg.Paths.OverridesDir = filepath.Join(dir, "overrides") // not there yet
@@ -71,6 +79,7 @@ func TestServiceAddRefused(t *testing.T) {
 		{with("name", `"Nextcloud"`), "name"},
 		{with("name", `"npm"`), "name"},
 		{with("dir", `"sem-compose"`), "dir"},
+		{with("dir", `"technitium"`), "dir"},
 		{with("host", `"https://cloud.engmariz.com"`), "host"},
 		{with("wait_min", `0`), "wait_min"},
 		{with("require_free_ip", `"x"`), "require_free_ip"},
