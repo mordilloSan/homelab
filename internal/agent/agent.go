@@ -394,6 +394,7 @@ type Agent struct {
 	rescan     atomic.Bool // asked for while a scan ran
 	beats      map[string][]Beat
 	tnasSeen   bool // last TNAS ping, so a change is logged once
+	routerMs   int  // the router's last ping, for the UI
 	userPath   string
 	creds      atomic.Pointer[creds] // read by every request, so outside mu; nil: no account yet
 	started    time.Time             // the account can be made in the first 30 minutes after it
@@ -590,6 +591,7 @@ func (a *Agent) inMaint(s *SvcState) bool {
 // with the server down it spends seconds on timeouts.
 type probe struct {
 	routerOK, npmOK, serverPing, tnasNPMOK bool
+	routerMs                               int
 	tnasNet, serverNet                     bool // each Technitium reaches the internet
 	tnasDNS, serverDNS                     bool // each Technitium answers
 	tnasPing                               bool // its own LAN IP is up (answered locally)
@@ -605,7 +607,10 @@ func (a *Agent) probe() probe {
 	tnasNPM := a.st.TNASNPM.Snapshot != ""
 	a.mu.Unlock()
 
-	p := probe{routerOK: a.ping(c.RouterIP), tnasPing: a.ping(c.TNASIP), svcOK: map[string]bool{}, svcMs: map[string]int{}, certs: map[string]string{}}
+	t0 := time.Now()
+	routerOK := a.ping(c.RouterIP)
+	// ponytail: wall time of the ping process, a ms or two over the real round trip
+	p := probe{routerOK: routerOK, routerMs: int(time.Since(t0).Milliseconds()), tnasPing: a.ping(c.TNASIP), svcOK: map[string]bool{}, svcMs: map[string]int{}, certs: map[string]string{}}
 	var certMu sync.Mutex
 	check := func(host, ip string) bool {
 		bad, err := certOK(a.sys.Check(host, ip))
@@ -721,6 +726,7 @@ func (a *Agent) evaluate(p probe) {
 		a.tnasSeen = p.tnasPing
 		a.event("", map[bool]string{true: "o TNAS responde no IP da LAN", false: "o TNAS não responde no próprio IP da LAN"}[p.tnasPing])
 	}
+	a.routerMs = p.routerMs
 	if p.routerOK != st.RouterOK {
 		st.RouterOK = p.routerOK
 		a.alert("", map[bool]string{true: "router acessível", false: "router inacessível: sem ações"}[p.routerOK])
@@ -1545,6 +1551,7 @@ func (a *Agent) publish() {
 		TNASIP           string    `json:"tnas_ip"`
 		RouterIP         string    `json:"router_ip"`
 		RouterOK         bool      `json:"router_ok"`
+		RouterMs         int       `json:"router_ms"`
 		TNASNetOK        bool      `json:"tnas_net_ok"`
 		ServerNetOK      bool      `json:"server_net_ok"`
 		TNASDNSOK        bool      `json:"tnas_dns_ok"`
@@ -1576,7 +1583,7 @@ func (a *Agent) publish() {
 		Verdict          Verdict   `json:"verdict"`
 	}{
 		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
-		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
+		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.routerMs, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},
