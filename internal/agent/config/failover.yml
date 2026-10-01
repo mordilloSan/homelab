@@ -14,7 +14,7 @@ start_timeout_min: 10                  # a cópia tem este tempo para ficar saud
 paths:
   mirror_subvol: /Volume1/ServerBackup
   mirror_root: homelab
-  snapshots_dir: /Volume1/@failover-snapshots   # failover-<svc>-<timestamp>; fora das partilhas do TOS
+  snapshots_dir: /Volume1/Docker/failover-snapshots   # failover-<svc>-<timestamp>
   overrides_dir: /Volume1/Docker/failover/overrides
 
 npm:
