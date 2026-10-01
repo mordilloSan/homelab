@@ -497,19 +497,29 @@ type discoveredService struct {
 	RequireFreeIP string   `json:"require_free_ip,omitempty"`
 	Notes         []string `json:"notes,omitempty"`
 	Configured    bool     `json:"configured"`
+	Ignored       bool     `json:"ignored,omitempty"` // left out by hand: listed apart, not resolved
 	Error         string   `json:"error,omitempty"`
 }
 
-// mirrorDirs are the folders of the mirror with a docker-compose.yml, but the NPM's.
+// mirrorDirs are the folders of the mirror with a docker-compose.yml, but the
+// NPM's and the clustered ones.
 func mirrorDirs(root, npm string) []string {
 	var out []string
 	ents, _ := os.ReadDir(root) // sorted; unreadable is none
 	for _, e := range ents {
-		if e.IsDir() && e.Name() != npm && fileExists(filepath.Join(root, e.Name(), "docker-compose.yml")) {
+		compose := filepath.Join(root, e.Name(), "docker-compose.yml")
+		if e.IsDir() && e.Name() != npm && fileExists(compose) && !clustered(compose) {
 			out = append(out, e.Name())
 		}
 	}
 	return out
+}
+
+// clustered is a compose that runs on the server and on the TNAS at once and
+// never fails over: the Technitium, a cluster of the two.
+func clustered(compose string) bool {
+	b, _ := os.ReadFile(compose)
+	return bytes.Contains(b, []byte("technitium/dns-server"))
 }
 
 // resolveCompose is `docker compose config --format json` of a folder of the
@@ -522,6 +532,26 @@ func (a *Agent) resolveCompose(root, dir, lan string) (composeInfo, error) {
 		return composeInfo{}, err
 	}
 	return analyzeCompose([]byte(out), lan)
+}
+
+// resolveAll resolves the folders' composes, a few at a time; an ignored
+// folder is left unread.
+func (a *Agent) resolveAll(root string, dirs, ignored []string, lan string) ([]composeInfo, []error) {
+	infos, errs := make([]composeInfo, len(dirs)), make([]error, len(dirs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i, dir := range dirs {
+		if slices.Contains(ignored, dir) {
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			infos[i], errs[i] = a.resolveCompose(root, dir, lan)
+		})
+	}
+	wg.Wait()
+	return infos, errs
 }
 
 // discover gathers what the TNAS can see: its network, the NPM's proxy hosts
@@ -550,17 +580,7 @@ func (a *Agent) discover() discovery {
 	d.NPM.Found, d.NPM.ProxyHosts = len(hosts) > 0, len(hosts)
 
 	dirs := mirrorDirs(root, c.NPM.Dir)
-	infos, errs := make([]composeInfo, len(dirs)), make([]error, len(dirs))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4) // a few composes at a time
-	for i, dir := range dirs {
-		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			infos[i], errs[i] = a.resolveCompose(root, dir, d.Network.LANIface)
-		})
-	}
-	wg.Wait()
+	infos, errs := a.resolveAll(root, dirs, c.Ignored, d.Network.LANIface)
 
 	// the IP the proxy hosts point to ties them to composes; the Technitium's
 	// wildcard, what the clients get, may be the NPM's own and only reports
@@ -582,6 +602,11 @@ func (a *Agent) discover() discovery {
 		s := discoveredService{Dir: dir, Name: slugName(dir)}
 		if j := slices.IndexFunc(c.Services, func(sv Service) bool { return sv.Dir == dir }); j >= 0 {
 			s.Name, s.Configured = c.Services[j].Name, true
+		}
+		if slices.Contains(c.Ignored, dir) {
+			s.Ignored = true
+			d.Services = append(d.Services, s)
+			continue
 		}
 		if errs[i] != nil {
 			s.Error = "o docker compose não leu o compose: " + errs[i].Error()

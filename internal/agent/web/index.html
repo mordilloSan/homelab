@@ -169,6 +169,8 @@ fieldset:disabled .set-input input { opacity: .6; cursor: not-allowed; }
 .disc-row { align-items: flex-start !important; }
 .disc-row input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; flex: none; }
 .disc-row.is-done { opacity: .7; }
+.disc-ignored { margin: 0 0 8px; }
+.disc-ignored summary { cursor: pointer; padding: 6px 0; font-size: 12.5px; }
 .disc-notes { display: block; color: var(--warning); font-size: 11.5px; margin-top: 2px; white-space: normal; } /* .list .grow cuts to one line */
 .tl-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
 .tl-row .pw-field input { width: 100%; min-width: 0; }
@@ -207,10 +209,29 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .banner .icon { color: var(--c); margin-top: 1px; }
 
 /* the topology: where every service is running right now */
-.topo { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 180px) minmax(0, 1fr);
-  grid-template-areas: ". clients ." "server lane tnas" ". internet ."; row-gap: 48px; align-items: stretch; }
+/* left to right, as a request goes: the clients, then the DNS, the internet and
+   the router, then the server over the TNAS, the agent's checks between them */
+.topo { position: relative; display: grid; grid-template-columns: auto minmax(170px, auto) minmax(0, 1fr);
+  grid-template-areas: "clients dns server" "clients internet lane" "clients router tnas"; column-gap: 56px; align-items: center;
+  padding-block: 40px; }
 #nodeServer { grid-area: server; } #nodeTnas { grid-area: tnas; } #lane { grid-area: lane; }
-#internet { grid-area: internet; }
+#dns { grid-area: dns; } #internet { grid-area: internet; } #routerNode { grid-area: router; }
+.clients.hop { justify-self: stretch; }
+.hop small .m { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; background: var(--neutral); }
+.hop small .m.up { background: var(--success); } .hop small .m.down { background: var(--error); }
+.hop small .m ~ .m { margin-left: 8px; }
+/* telemetry in the corners: when it checked, the next check, latency, mode, mirror, images */
+.hud > span { position: absolute; z-index: 1; font: 500 10px/1.5 var(--mono); color: var(--muted); text-transform: uppercase;
+  letter-spacing: .08em; white-space: pre; font-variant-numeric: tabular-nums; pointer-events: none; }
+.hud b { color: var(--primary); font-weight: 600; }
+.hud-tl { top: 0; left: 0; } .hud-tr { top: 0; right: 0; text-align: right; }
+.hud-bl { bottom: 0; left: 0; } .hud-br { bottom: 0; right: 0; text-align: right; }
+/* the TNAS's radar: one turn per check interval, started again at every check */
+.radar { position: relative; width: 22px; height: 22px; border-radius: 50%; flex: none; overflow: hidden;
+  border: 1px solid var(--divider); background: radial-gradient(circle, transparent 0 34%, var(--divider) 35% 38%, transparent 39%); }
+.radar i { position: absolute; inset: 0; border-radius: 50%; animation: sweep var(--period, 60s) linear infinite;
+  background: conic-gradient(transparent 0 75%, color-mix(in srgb, var(--info), transparent 30%)); }
+@keyframes sweep { to { transform: rotate(1turn); } }
 .clients { grid-area: clients; justify-self: center; position: relative; z-index: 1; display: flex; align-items: center; gap: 10px;
   padding: 7px 16px 7px 7px; border-radius: 999px; background: var(--paper); border: 1px solid var(--divider); box-shadow: var(--shadow); white-space: nowrap; }
 .clients .node-icon { width: 32px; height: 32px; border-radius: 50%; }
@@ -223,17 +244,20 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .wire.on { stroke: color-mix(in srgb, var(--wc), transparent 50%); stroke-dasharray: 6 8; animation: wire 1s linear infinite; }
 @keyframes wire { to { stroke-dashoffset: -14; } }
 .pkt { fill: var(--wc); filter: drop-shadow(0 0 4px var(--wc)); }
+.wire.cluster { stroke: color-mix(in srgb, var(--wc), transparent 40%); stroke-dasharray: 3 5; }
 .node, .lane { position: relative; z-index: 1; }
-.probe { position: absolute; left: 0; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--pc);
+.probe { position: absolute; left: 50%; top: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--pc);
   box-shadow: 0 0 12px 3px color-mix(in srgb, var(--pc), transparent 40%); pointer-events: none; }
-.lane-label { grid-area: label; align-self: end; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-/* under the link: the mode, then the services on their way */
-.lane-under { grid-area: pills; align-self: start; display: grid; justify-items: center; gap: 8px; margin-top: 6px; }
+/* opaque, on the link: the interval, the mode, then the services on their way */
+.lane-label { color: var(--muted); font-size: 11.5px; white-space: nowrap; background: var(--paper); padding: 2px 8px; border-radius: 999px; }
+.lane-under { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
 /* opaque: the link runs behind it when the boxes stack */
 .mode-chip { text-decoration: none; background: linear-gradient(color-mix(in srgb, var(--c), transparent 87%), color-mix(in srgb, var(--c), transparent 87%)), var(--paper); }
 /* heartbeat bars: one per check, newest on the right */
-.beats { display: flex; gap: 2px; height: 22px; align-items: stretch; }
-.beat { flex: 1; min-width: 2px; border-radius: 3px; background: color-mix(in srgb, var(--text), transparent 92%); transform-origin: bottom; }
+/* the height is the time it took (log scale), so a service slowing down shows before it fails */
+.beats { display: flex; gap: 2px; height: 22px; align-items: flex-end; }
+.beat { flex: 1; min-width: 2px; height: var(--h, 30%); border-radius: 3px; background: color-mix(in srgb, var(--text), transparent 92%); transform-origin: bottom; }
+.beat.slow { background: var(--warning); }
 .beat.up { background: color-mix(in srgb, var(--success), transparent 25%); } .beat.down { background: var(--error); }
 .beat.unknown { background: color-mix(in srgb, var(--neutral), transparent 55%); }
 .beat.new { animation: beat-in .5s cubic-bezier(.2, .8, .2, 1); }
@@ -291,10 +315,14 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .pill:hover { background: color-mix(in srgb, var(--text), transparent 90%); }
 .pill .icon { width: 16px; height: 16px; color: var(--c); }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+/* in a box, each service carries its last checks and the last time */
+.pill .beats { width: 84px; height: 18px; gap: 1px; }
+.pill .beat { min-width: 1px; border-radius: 1px; }
+.pill-ms { min-width: 42px; color: var(--muted); font-size: 11.5px; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.lane-pills .beats, .lane-pills .pill-ms { display: none; }
 .empty { color: var(--muted); font-size: 12.5px; }
-/* the label above the link, the services on their way below (beside it when vertical) */
-.lane { position: relative; display: grid; grid-template-rows: 1fr 1fr; grid-template-areas: "label" "pills";
-  justify-items: center; gap: 8px; padding: 12px 8px; }
+/* the link runs down from the server to the TNAS */
+.lane { position: relative; display: grid; justify-items: center; align-items: center; padding: 14px 0; }
 .lane-pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 /* opaque, so the link does not show through them when it runs vertically behind */
 .lane-pills .pill { background: var(--paper); }
@@ -304,26 +332,25 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .lane { --fc: var(--success); }
 .lane.down { --fc: var(--error); }
 .lane.moving { --fc: var(--warning); }
-.flow { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px;
-  background: repeating-linear-gradient(90deg, var(--divider) 0 6px, transparent 6px 12px); }
-.lane.active .flow { background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
+.flow { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  background: repeating-linear-gradient(180deg, var(--divider) 0 6px, transparent 6px 12px); }
+.lane.active .flow { background-image: repeating-linear-gradient(180deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
   animation: flow .8s linear infinite; }
-.flow::after { content: ""; position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; opacity: 0;
+.flow::after { content: ""; position: absolute; top: 0; left: -3px; width: 8px; height: 8px; border-radius: 50%; opacity: 0;
   background: var(--fc); box-shadow: 0 0 10px 2px color-mix(in srgb, var(--fc), transparent 40%); }
 .lane.active .flow::after { opacity: 1; animation: packet 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
 .lane.back .flow, .lane.back .flow::after { animation-direction: reverse; }
-@keyframes flow { to { background-position: 12px 0; } }
-@keyframes packet { from { left: 0; } to { left: calc(100% - 8px); } }
+@keyframes flow { to { background-position: 0 12px; } }
+@keyframes packet { from { top: 0; } to { top: calc(100% - 8px); } }
 .lane > :not(.flow, .probe) { position: relative; }
 .hero-foot { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px;
   border-top: 1px solid var(--divider); }
-.hero-foot .router { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
+.hero-foot { justify-content: flex-end; }
 .duration { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 
 /* services */
 /* under the topology: the services, then the events with their own scroll */
 .lower { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
-.svc-col { display: grid; gap: 16px; min-width: 0; }
 .ev-card { display: flex; flex-direction: column; min-height: 0; padding-bottom: 12px; }
 .ev-card .timeline { overflow-y: auto; min-height: 0; flex: 1; margin: 0 -8px; padding: 0 8px; }
 /* wide screens: the page fits the window, and only the lists scroll */
@@ -334,23 +361,10 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
   .ev-card { flex: 1; min-height: 240px; } /* below that, the page scrolls */
 }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
-.svc { --accent: var(--success); display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; cursor: pointer;
-  border-bottom: 3px solid color-mix(in srgb, var(--accent), transparent 70%); scroll-margin-top: 84px; transition: border-color .5s, background-color .15s; }
-.svc.alert { border-bottom-color: var(--accent); }
-.svc:hover { background-color: color-mix(in srgb, var(--text), transparent 96%); }
-.svc-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.svc-top h3 { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.svc-top .svc-icon { width: 30px; height: 30px; border-radius: 8px; }
-.svc-top .svc-icon .icon { width: 18px; height: 18px; }
-.svc-top .sdot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--accent); }
-.svc-line { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .svc-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 26%; flex: none; color: var(--accent);
   background: color-mix(in srgb, var(--accent), transparent 86%); }
 .svc-icon .icon { width: 22px; height: 22px; }
 .svc-icon:has(.svc-img) { background: none; } /* a service's own icon has its colours: no tint behind it */
-.svc-open { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: inherit;
-  font: inherit; cursor: pointer; }
-.svc-open:hover { color: var(--primary); }
 .status { display: grid; gap: 8px; }
 .status p { color: var(--text); }
 .status.tone-error p { color: var(--error); }
@@ -455,7 +469,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
 .note-text { color: var(--muted) !important; font-size: 12.5px; margin-top: 8px; }
 
 @media (max-width: 860px) {
-  .set-sec, .svc { scroll-margin-top: 124px; } /* the sticky header takes two lines here */
+  .set-sec { scroll-margin-top: 124px; } /* the sticky header takes two lines here */
   .ev, .sheet .ev { grid-template-columns: 14px auto minmax(0, 1fr); row-gap: 2px; }
   .ev p { grid-column: 2 / -1; }
   .settings { grid-template-columns: minmax(0, 1fr); }
@@ -464,26 +478,19 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   .toc { display: none; }
   .lower { grid-template-columns: minmax(0, 1fr); }
   .ev-card .timeline { max-height: 60vh; }
-  .topo { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clients" "server" "lane" "tnas" "internet"; row-gap: 0; }
-  #internet { margin: 14px 0 0; }
+  /* one column: the clients, the three hops side by side, then the server over the TNAS */
+  .topo { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "clients clients clients" "dns internet router"
+    "server server server" "lane lane lane" "tnas tnas tnas"; column-gap: 6px; row-gap: 0; }
   .wires { display: none; }
   .clients { margin-bottom: 14px; }
-  .probe { left: 50%; top: 0; }
-  /* only the mode, centred on the link; the label goes */
-  .lane { grid-template: auto / minmax(0, 1fr); grid-template-areas: "pills"; align-items: center; padding: 14px 0; }
+  .clients.hop { align-self: stretch; padding: 6px 8px; gap: 6px; border-radius: 12px; white-space: normal; min-width: 0; }
+  .hop .node-icon { display: none; }
+  .hop strong { font-size: 12px; }
+  .hop small { font-size: 10.5px; }
+  .hud-tr, .hud-br { display: none; }
   .lane-label { display: none; }
-  .lane-under { margin-top: 0; }
   .sm-hide { display: none !important; }
-  .hero-foot .router { flex-basis: 100%; } /* the maintenance and its time share the line below */
   .lane-pills:empty { display: none; }
-  .flow { left: 50%; right: auto; top: 0; bottom: 0; width: 2px; height: auto; margin: 0 0 0 -1px;
-    background: repeating-linear-gradient(180deg, var(--divider) 0 6px, transparent 6px 12px); }
-  .lane.active .flow { background-image: repeating-linear-gradient(180deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
-    animation-name: flow-v; }
-  .flow::after { top: 0; left: -3px; }
-  .lane.active .flow::after { animation-name: packet-v; }
-  @keyframes flow-v { to { background-position: 0 12px; } }
-  @keyframes packet-v { from { top: 0; } to { top: calc(100% - 8px); } }
   dialog.sheet { border-radius: 0; }
 }
 @media (max-width: 420px) { .grid { grid-template-columns: minmax(0, 1fr); } .seg { grid-template-columns: 1fr; } }
@@ -511,23 +518,22 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   <section class="card" aria-label="Onde está cada serviço">
     <div class="topo" id="topo">
       <svg class="wires" id="wires" aria-hidden="true"></svg>
+      <div class="hud" id="hud" aria-hidden="true"><span class="hud-tl"></span><span class="hud-tr"></span><span class="hud-bl"></span><span class="hud-br"></span></div>
       <div class="clients" id="clients"></div>
-      <div class="clients" id="internet"></div>
+      <div class="clients hop" id="dns"></div>
+      <div class="clients hop" id="internet"></div>
+      <div class="clients hop" id="routerNode"></div>
       <div class="node" id="nodeServer"></div>
       <div class="lane" id="lane"></div>
       <div class="node" id="nodeTnas"></div>
     </div>
     <div class="hero-foot">
-      <span class="router" id="router"></span>
       <label class="toggle"><input type="checkbox" role="switch" class="switch" id="maintGlobal"> <span id="maintGlobalText">Manutenção global</span></label>
       <label class="duration">durante <input type="number" id="maintMin" min="1" max="10080" value="60"> min</label>
     </div>
   </section>
 
   <div class="lower">
-    <div class="svc-col">
-      <div class="grid" id="svcs"></div>
-    </div>
     <section class="card ev-card" aria-label="Eventos">
       <div class="card-head"><h2>Eventos</h2><span class="spacer"></span><span class="muted" id="evCount"></span></div>
       <div class="ev-filters" id="evFilters"></div>
@@ -788,18 +794,23 @@ const pill = s => {
   // failing on the server: a ring fills up until the failover starts
   const ring = s.state === 'NORMAL' && s.fail_since && !s.server_ok
     ? `<span class="ring" style="--p:${Math.min(100, Math.round(minsSince(s.fail_since) / s.wait_min * 100))}"></span>` : '';
+  const b = st.beats?.[s.name], l = b?.[b.length - 1];
+  const ms = !fine(s) ? S.label : l?.s === 'up' ? `${l.ms} ms` : l?.s === 'down' ? 'em falha' : '';
   return `<button class="pill ${S.busy ? 'busy' : ''} ${fine(s) ? 'quiet' : ''}" data-panel="svc" data-svc="${esc(s.name)}" data-flip="${esc(s.name)}"
-    style="--c:${S.c}" title="${esc(S.label)}${s.state === 'FAILING_OVER' ? `: ${esc(nextStep(s))}` : ''}. Ver detalhes">${svcIcon(s.name)}${esc(s.name)}${S.busy ? '<span class="dot"></span>' : ring}</button>`;
+    style="--c:${S.c}" title="${esc(S.label)}${s.state === 'FAILING_OVER' ? `: ${esc(nextStep(s))}` : ''}. Ver detalhes">${svcIcon(s.name)}${esc(s.name)}
+    <span class="beats" data-beats="${esc(s.name)}" data-n="28" aria-hidden="true"></span><span class="pill-ms">${esc(ms)}</span>${S.busy ? '<span class="dot"></span>' : ring}</button>`;
 };
 
 // Heartbeat bars: the last checks of the server's NPM or of one service, newest on the right.
 const lastBeat = {};
-function beatsHtml(name) {
-  const b = (st.beats || {})[name] || [];
+// The height is the time, on a log scale: 5 ms is under half, 500 ms near full; a failure is full and red.
+const beatH = x => x.s === 'down' ? 100 : x.s === 'up' ? Math.round(25 + 75 * Math.min(1, Math.log10(1 + x.ms) / 3)) : 30;
+function beatsHtml(name, n = 40) {
+  const b = ((st.beats || {})[name] || []).slice(-n);
   const isNew = b.length && lastBeat[name] !== b[b.length - 1].t;
   const tip = x => `${new Date(x.t).toLocaleTimeString('pt-PT')}: ${x.s === 'up' ? `${x.ms} ms` : x.s === 'down' ? 'em falha' : 'não verificado'}`;
-  return '<i class="beat"></i>'.repeat(Math.max(0, 40 - b.length))
-    + b.map((x, i) => `<i class="beat ${x.s}${isNew && i === b.length - 1 ? ' new' : ''}" title="${esc(tip(x))}"></i>`).join('');
+  return '<i class="beat" style="--h:15%"></i>'.repeat(Math.max(0, n - b.length))
+    + b.map((x, i) => `<i class="beat ${x.s}${x.s === 'up' && x.ms >= 1000 ? ' slow' : ''}${isNew && i === b.length - 1 ? ' new' : ''}" style="--h:${beatH(x)}%" title="${esc(tip(x))}"></i>`).join('');
 }
 function beatsFoot(name) {
   const b = (st.beats || {})[name] || [];
@@ -811,7 +822,7 @@ function beatsFoot(name) {
 // Bars live outside the painted markup so a new check does not redraw the whole card.
 function fillBeats() {
   document.querySelectorAll('[data-beats]').forEach(el => {
-    const html = beatsHtml(el.dataset.beats);
+    const html = beatsHtml(el.dataset.beats, +el.dataset.n || 40);
     if (el.__html !== html) { el.__html = html; el.innerHTML = html; }
   });
   document.querySelectorAll('[data-beats-foot]').forEach(el => {
@@ -851,11 +862,11 @@ function renderTopology() {
     else if (s.state === 'FAILING_OVER' || s.state === 'RETURNING') at.moving.push(s);
     else at.server.push(s);
   }
-  const node = (kind, ic, title, ip, chipHtml, meta, list, empty, health) => `
+  const node = (kind, ic, title, ip, chipHtml, meta, list, empty, health, extra = '') => `
     <button class="node-head" data-panel="${kind}" aria-haspopup="dialog" title="Ver detalhes do ${title}">
       <span class="node-icon st st-${health.s}" title="${esc(health.why)}">${icon(ic)}</span>
       <span class="node-id"><span class="node-title">${title}</span><span class="mono muted">${esc(ip)}</span></span>
-      <span class="node-end">${chipHtml}</span></button>
+      <span class="node-end">${extra}${chipHtml}</span></button>
     ${[meta].flat().filter(Boolean).map(m => `<div class="node-meta ${m.warn ? 'warn' : ''} ${m.cls || ''}" ${m.title ? `title="${esc(m.title)}"` : ''}>${icon(m.icon)}<span>${esc(m.text)}</span></div>`).join('')}
     <div class="pills" data-drop="${kind}">${list.length ? list.map(pill).join(' ') : `<span class="empty">${empty}</span>`}</div>
     ${kind === 'server' ? `<div class="node-beats">${beatsBlock('npm')}</div>` : ''}`;
@@ -863,8 +874,10 @@ function renderTopology() {
   // FLIP: remember where every pill was, redraw, then slide each moved pill from there.
   const before = new Map([...document.querySelectorAll('.topo [data-flip]')].map(el => [el.dataset.flip, el.getBoundingClientRect()]));
   paint('nodeServer', node('server', 'server', 'Servidor', st.server_ip, serverChip(),
-    {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`, cls: 'sm-hide'}, at.server, 'Nenhum serviço no servidor', serverHealth()));
-  paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), [readyMeta(), imagesMeta(), mirrorMeta()], at.tnas, 'Nenhuma cópia a servir', tnasHealth()));
+    {icon: 'clock', text: `Verificado a cada ${st.check_interval_s} s, pelo NPM do servidor`, cls: 'sm-hide'}, at.server,
+    st.services.length ? 'Nenhum serviço no servidor' : 'Nenhum serviço protegido. Adiciona-os em <a href="#/definicoes/servicos">Definições → Serviços</a>.', serverHealth()));
+  paint('nodeTnas', node('tnas', 'nas', 'TNAS', st.tnas_ip, tnasChip(), [readyMeta(), imagesMeta(), mirrorMeta()], at.tnas, 'Nenhuma cópia a servir', tnasHealth(),
+    `<span class="radar" style="--period:${st.check_interval_s}s" title="Uma volta por verificação, a cada ${st.check_interval_s} s"><i></i></span>`));
   const lane = $('lane'), back = at.moving.length > 0 && at.moving.every(s => s.state === 'RETURNING') && !at.tnas.length;
   // the link shows the checks (probePulse marks each one) and services on their way; client traffic is on the wires
   lane.classList.toggle('active', at.moving.length > 0 || st.router_ok);
@@ -873,8 +886,8 @@ function renderTopology() {
   lane.classList.toggle('back', at.moving.length ? back : true);
   $('nodeTnas').classList.toggle('lit', at.tnas.length > 0);
   const auto = st.mode === 'auto';
-  paint('lane', `<span class="flow"></span><span class="lane-label">verifica o servidor a cada ${st.check_interval_s} s</span>
-    <div class="lane-under"><a class="chip mode-chip" href="#/definicoes/geral" style="--c:${auto ? 'var(--success)' : 'var(--warning)'}"
+  paint('lane', `<span class="flow"></span>
+    <div class="lane-under"><span class="lane-label">verifica o servidor a cada ${st.check_interval_s} s</span><a class="chip mode-chip" href="#/definicoes/geral" style="--c:${auto ? 'var(--success)' : 'var(--warning)'}"
       title="${auto ? 'Faz failover e regresso sozinho' : 'Só regista o que faria'}. Mudar em Definições → Geral">${auto ? 'Automático' : 'Modo observação'}</a>
       <div class="lane-pills">${at.moving.map(pill).join('')}</div></div>`);
   paint('clients', `<span class="node-icon">${icon('devices')}</span><span><strong>Clientes</strong>
@@ -885,6 +898,14 @@ function renderTopology() {
   const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : all.includes('unknown') ? 'por verificar' : 'servidor e TNAS com acesso';
   paint('internet', `<span class="node-icon st st-${ns}">${icon('web')}</span><span><strong>Internet</strong><small>${ntext}</small></span>`);
   $('internet').title = `A cada ${st.check_interval_s} s, cada caixa pede ao seu Technitium um nome que nenhuma cache tem: a resposta tem de vir da internet`;
+  // the Technitium runs on both, in a cluster: a dot for each, asked for its own zone
+  const dm = dnsMembers(), ds = dm.every(x => x.s === 'up') ? 'up' : dm.some(x => x.s === 'up') ? 'warn' : dm.some(x => x.s === 'down') ? 'down' : 'unknown';
+  paint('dns', `<span class="node-icon st st-${ds}">${icon('dns')}</span><span><strong>DNS em cluster</strong>
+    <small>${dm.map(x => `<i class="m ${x.s}"></i>.${esc(x.ip.split('.').pop())}`).join('')}</small></span>`);
+  $('dns').title = `O Technitium em cluster: ${dm.map(x => `${x.who} (${x.ip}) ${{up: 'responde', down: 'não responde', unknown: 'por verificar'}[x.s]}`).join(', ')}`;
+  paint('routerNode', `<span class="node-icon st st-${st.router_ok ? 'up' : 'down'}">${icon('router')}</span><span><strong>Router</strong>
+    <small><span class="mono">${esc(st.router_ip)}</span><span class="sm-hide"> · ${st.router_ok ? 'acessível' : 'inacessível'}</span></small></span>`);
+  renderHud();
   fillBeats();
   renderWires();
 
@@ -903,9 +924,6 @@ function renderTopology() {
     });
   }
   firstTopo = false;
-
-  // on a small screen only "Router": the colour says the rest
-  paint('router', `<span class="chip xs ${st.router_ok ? 'quiet' : ''}" style="--c:${st.router_ok ? 'var(--success)' : 'var(--error)'}">${st.router_ok ? '<span class="dot"></span>' : ''}<span>Router<span class="sm-hide"> ${st.router_ok ? 'acessível' : 'inacessível'}</span></span></span><span class="mono muted">${esc(st.router_ip)}</span>`);
   probePulse();
 }
 
@@ -915,6 +933,27 @@ const netState = () => ({
   server: !st.router_ok || !st.server_up ? 'unknown' : st.server_net_ok ? 'up' : 'down',
   tnas: !st.router_ok ? 'unknown' : st.tnas_net_ok ? 'up' : 'down',
 });
+
+// The two members of the DNS cluster; the server's is unknown while the server is down.
+const dnsMembers = () => [
+  {who: 'servidor', ip: st.server_ip, s: !st.router_ok || !st.server_up ? 'unknown' : st.server_dns_ok ? 'up' : 'down'},
+  {who: 'TNAS', ip: st.tnas_ip, s: st.tnas_dns_ok ? 'up' : 'down'},
+];
+
+// Telemetry in the corners of the topology; the next check counts down every second.
+function renderHud() {
+  if (!st) return;
+  const v = x => `<b>${esc(x)}</b>`;
+  const next = Math.round((Date.parse(st.now) + st.check_interval_s * 1000 - Date.now()) / 1000);
+  const ups = st.services.map(s => st.beats?.[s.name]?.at(-1)).filter(x => x?.s === 'up');
+  const npm = st.beats?.npm?.at(-1);
+  const home = st.services.filter(s => s.state === 'NORMAL').length, img = imgCount(allStacks());
+  const set = (cls, html) => { const el = $('hud').querySelector(cls); if (el.__html !== html) { el.__html = html; el.innerHTML = html; } };
+  set('.hud-tl', `Verif ${v(new Date(st.now).toLocaleTimeString('pt-PT'))}\nPróx ${v(next > 0 ? `${next} s` : 'agora')}`);
+  set('.hud-tr', `Lat média ${v(ups.length ? `${Math.round(ups.reduce((n, x) => n + x.ms, 0) / ups.length)} ms` : '—')}\nNPM ${v(npm?.s === 'up' ? `${npm.ms} ms` : npm?.s === 'down' ? 'falha' : '—')}`);
+  set('.hud-bl', `Modo ${v(st.mode === 'auto' ? 'auto' : 'observação')} · Manut ${v(st.maint_until ? `até ${clock(st.maint_until)}` : 'off')}\nEm casa ${v(`${home}/${st.services.length}`)}`);
+  set('.hud-br', `Espelho ${v(st.mirror_changed ? ago(st.mirror_changed) : '—')}\nImagens ${v(img.known ? `${img.present}/${img.total}` : '—')}`);
+}
 
 // The wires from the clients: requests go wherever the DNS sends them, the
 // server unless a service's A record points at the TNAS. Packets travel along
@@ -926,9 +965,11 @@ function renderWires() {
   const box = topo.getBoundingClientRect();
   const r = id => { const b = $(id).getBoundingClientRect(); return {x: b.left - box.left, y: b.top - box.top, w: b.width, h: b.height}; };
   const c = r('clients'), s = r('nodeServer'), t = r('nodeTnas');
-  const n = r('internet');
-  const from = {x: c.x + c.w / 2, y: c.y + c.h};
-  const d = (to, f = from) => { const k = (to.y - f.y) * .55; return `M ${f.x} ${f.y} C ${f.x} ${f.y + k}, ${to.x} ${to.y - k}, ${to.x} ${to.y}`; };
+  const n = r('internet'), dn = r('dns'), ro = r('routerNode');
+  const right = b => ({x: b.x + b.w, y: b.y + b.h / 2}), left = (b, f = .5) => ({x: b.x, y: b.y + b.h * f});
+  // across: a curve leaving and arriving level; down: a straight line
+  const d = (f, to) => { const k = (to.x - f.x) * .5; return `M ${f.x} ${f.y} C ${f.x + k} ${f.y}, ${to.x - k} ${to.y}, ${to.x} ${to.y}`; };
+  const down = (a, b) => `M ${a.x + a.w / 2} ${a.y + a.h} L ${b.x + b.w / 2} ${b.y}`;
   const viaTnas = st.services.filter(x => x.dns).length, viaServer = st.services.length - viaTnas;
   const wire = (id, path, color, n) => {
     const on = n > 0;
@@ -936,13 +977,17 @@ function renderWires() {
       `<circle r="3.5" class="pkt"><animateMotion dur="2.4s" begin="${(-i * 0.8).toFixed(1)}s" repeatCount="indefinite"><mpath href="#${id}"/></animateMotion></circle>`).join('') : '';
     return `<g style="--wc:${color}"><path id="${id}" class="wire ${on ? 'on' : ''}" d="${path}"/>${pkts}</g>`;
   };
-  const nets = netState();
-  const netWire = (id, f, to, s) => wire(id, d(to, f), s === 'up' ? 'var(--success)' : 'var(--error)', s === 'unknown' ? 0 : 1);
-  const html = wire('wire-server', d({x: s.x + s.w * .62, y: s.y}), st.server_npm_ok ? 'var(--success)' : 'var(--error)', viaServer)
-    + wire('wire-tnas', d({x: t.x + t.w * .38, y: t.y}), 'var(--info)', viaTnas)
-    // and from each box down to the internet, through its own Technitium
-    + netWire('wire-net-server', {x: s.x + s.w * .62, y: s.y + s.h}, {x: n.x + n.w * .3, y: n.y}, nets.server)
-    + netWire('wire-net-tnas', {x: t.x + t.w * .38, y: t.y + t.h}, {x: n.x + n.w * .7, y: n.y}, nets.tnas);
+  const nets = Object.values(netState()), net = nets.includes('up') ? 'up' : nets.includes('down') ? 'down' : 'unknown';
+  const tone = x => x === 'up' ? 'var(--success)' : x === 'down' ? 'var(--error)' : 'var(--neutral)';
+  // the cluster: a dashed line from the DNS to each member, the colour its answer
+  const member = (id, to, x) => `<g style="--wc:${tone(x)}"><path id="${id}" class="wire cluster" d="${d(right(dn), left(to, .18))}"/></g>`;
+  const [ms, mt] = dnsMembers();
+  const html = wire('wire-lan', d(right(c), left(ro)), 'var(--success)', st.router_ok ? st.services.length : 0)
+    + wire('wire-server', d(right(ro), left(s)), st.server_npm_ok ? 'var(--success)' : 'var(--error)', viaServer)
+    + wire('wire-tnas', d(right(ro), left(t)), 'var(--info)', viaTnas)
+    + wire('wire-dns-net', down(dn, n), tone(net), net === 'unknown' ? 0 : 1)
+    + wire('wire-router-net', down(n, ro), tone(st.router_ok ? 'up' : 'down'), 1)
+    + member('wire-dns-server', s, ms.s) + member('wire-dns-tnas', t, mt.s);
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
   if (svg.__html !== html) { svg.__html = html; svg.innerHTML = html; }
 }
@@ -956,14 +1001,16 @@ function probePulse() {
   const first = lastTick === null;
   lastTick = tick;
   if (first || reduceMotion.matches || !st.router_ok) return;
-  const lane = $('lane'), vertical = matchMedia('(max-width: 860px)').matches;
+  const radar = document.querySelector('#nodeTnas .radar i');
+  if (radar) { radar.style.animation = 'none'; void radar.offsetWidth; radar.style.animation = ''; }
+  const lane = $('lane');
   const color = st.server_npm_ok ? 'var(--success)' : 'var(--error)';
   const dot = document.createElement('span');
   dot.className = 'probe';
   dot.style.setProperty('--pc', color);
   lane.append(dot);
-  const len = vertical ? lane.clientHeight : lane.clientWidth;
-  const at = p => vertical ? `translate(-50%, ${p}px)` : `translate(${p}px, -50%)`;
+  const len = lane.clientHeight;
+  const at = p => `translate(-50%, ${p}px)`;
   const ripple = el => el?.animate([{boxShadow: `0 0 0 0 color-mix(in srgb, ${color}, transparent 30%)`}, {boxShadow: '0 0 0 12px transparent'}],
     {duration: 700, easing: 'ease-out'});
   ripple(document.querySelector('#nodeTnas .node-icon'));
@@ -1023,22 +1070,6 @@ function actionButton(s, act, allowed) {
 const canFail = s => s.state === 'NORMAL' || (s.state === 'ERROR' && !s.snapshot && !s.dns);
 const canReturn = s => ['FAILING_OVER', 'ACTIVE', 'ERROR'].includes(s.state);
 const actions = s => `${maintSwitch(s)}<span>${actionButton(s, 'failover', canFail(s))} ${actionButton(s, 'return', canReturn(s))}</span>`;
-
-// Compact cards: what it is, where it runs, how the last checks went. Everything else is in its panel.
-const lastMs = name => { const b = st.beats?.[name]; const l = b?.[b.length - 1]; return l?.s === 'up' ? ` · ${l.ms} ms` : ''; };
-function renderServices() {
-  paint('svcs', st.services.map(s => {
-    const S = look(s);
-    return `<article class="card svc ${fine(s) ? '' : 'alert'}" id="svc-${esc(s.name)}" data-panel="svc" data-svc="${esc(s.name)}" style="--accent:${S.c}">
-      <div class="svc-top"><span class="svc-icon">${svcIcon(s.name)}</span>
-        <h3><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}" aria-haspopup="dialog">${esc(s.name)}</button></h3>
-        <span class="sdot" title="${esc(S.label)}"></span></div>
-      ${fine(s) ? `<p class="svc-line">No servidor${lastMs(s.name)}</p>` : statusBlock(s)}
-      <div class="beats" data-beats="${esc(s.name)}" role="img" aria-label="Últimas verificações"></div>
-    </article>`;
-  }).join('') || '<p class="empty">Nenhum serviço protegido. Adiciona-os em <a href="#/definicoes/servicos">Definições → Serviços</a>.</p>');
-  fillBeats();
-}
 
 function evTone(m) {
   if (/^ERRO/.test(m)) return 'var(--error)';
@@ -1474,7 +1505,7 @@ function renderSettings() {
       <label class="field">Verificar o servidor a cada <select id="interval" ${pending.has('interval') ? 'disabled' : ''}>
         ${ivs.map(v => `<option value="${v}" ${v === iv ? 'selected' : ''}>${secs(v)}</option>`).join('')}</select></label>`);
   if (currentTab() === 'settings' && !disc && !discErr && !discing) getDiscovery().then(() => repaintSec('servicos'), () => repaintSec('servicos'));
-  const discNew = disc?.services.filter(x => !x.configured) || [];
+  const discNew = disc?.services.filter(x => !x.configured && !x.ignored) || [];
   paintSec('servicos', `<h2>Serviços</h2>
       <p class="note-text wiz-intro">As pastas do espelho com docker-compose.yml, com o endereço que o NPM lhes dá. "Adicionar" abre o formulário já preenchido; um serviço que não está no espelho adiciona-se à mão.</p>
       <div class="sec-btns" style="margin-bottom:8px"><button type="button" class="btn contained" data-panel="svcEdit" aria-haspopup="dialog">${icon('plus')}Adicionar à mão</button></div>
@@ -1547,16 +1578,22 @@ const NET_KEYS = [['router_ip', 'router_ip'], ['tnas_ip', 'tnas_ip'], ['lan_ifac
 
 // The discovered services, to protect with one click each (or all at once).
 function discListHtml(d, pickable) {
-  const rows = d.services.map(x => {
+  const ignored = d.services.filter(x => x.ignored);
+  const rows = d.services.filter(x => !x.ignored).map(x => {
     const can = !x.configured && !x.error && x.host;
     const notes = [x.error, ...(x.notes || [])].filter(Boolean);
     return `<li class="disc-row ${x.configured ? 'is-done' : ''}">
       ${pickable ? `<input type="checkbox" data-pick="${esc(x.dir)}" ${can ? 'checked' : ''} ${x.configured || x.error ? 'disabled' : ''} aria-label="Proteger ${esc(x.name)}">` : ''}
       <span class="grow"><strong>${esc(x.name)}</strong> <span class="mono muted">${esc(x.host || 'sem endereço')}</span>
         ${notes.map(n => `<small class="disc-notes">${esc(sentence(n))}</small>`).join('')}</span>
-      ${x.configured ? chip('Já protegido', 'var(--success)', 'xs') : pickable ? '' : `<button class="btn" data-panel="svcEdit" data-prefill="${esc(x.dir)}">Adicionar</button>`}</li>`;
+      ${x.configured ? chip('Já protegido', 'var(--success)', 'xs') : ''}
+      ${pickable ? '' : x.configured ? `<button class="btn" data-panel="svcEdit" data-svc="${esc(x.name)}">${icon('wrench')}Editar</button>`
+        : `<button class="btn" data-panel="svcEdit" data-prefill="${esc(x.dir)}">Adicionar</button><button class="btn" data-ignore="1" data-dir="${esc(x.dir)}" title="Uma pasta antiga, de um container que já não existe: sai da lista e a vigia do espelho deixa de avisar por ela">Ignorar</button>`}</li>`;
   }).join('');
-  return `<ul class="list disc-list">${rows || '<li class="empty">Não encontrei nenhuma pasta com docker-compose.yml no espelho.</li>'}</ul>`;
+  // folders left out by hand (an old container's, still in the backup), out of the way
+  const away = pickable || !ignored.length ? '' : `<details class="disc-ignored"><summary class="muted">${plural(ignored.length, 'pasta ignorada', 'pastas ignoradas')}</summary>
+    <ul class="list">${ignored.map(x => `<li><span class="grow mono">${esc(x.dir)}</span><button class="btn" data-ignore="0" data-dir="${esc(x.dir)}">Deixar de ignorar</button></li>`).join('')}</ul></details>`;
+  return `<ul class="list disc-list">${rows || '<li class="empty">Não encontrei nenhuma pasta com docker-compose.yml no espelho.</li>'}</ul>${away}`;
 }
 // Adds the discovered services picked; says how many and what failed.
 async function protectPicked(picked) {
@@ -1570,6 +1607,19 @@ async function protectPicked(picked) {
   return {n: picked.length - failed.length, failed};
 }
 document.addEventListener('click', async e => {
+  const ign = e.target.closest('button[data-ignore]');
+  if (ign) {
+    const {dir} = ign.dataset, ignore = ign.dataset.ignore === '1';
+    ign.disabled = true;
+    if (await post('api/mirror/ignore', {dir, ignore}, ignore ? `Pasta ${dir} ignorada` : `Pasta ${dir} de volta à descoberta`, 'ignore')) {
+      const x = disc?.services.find(s => s.dir === dir);
+      if (x && ignore) x.ignored = true;
+      else forgetDiscovery(); // an ignored folder was never read: discover it again
+    }
+    painted['set-servicos'] = null;
+    renderSettings();
+    return;
+  }
   if (e.target.closest('[data-rediscover]')) {
     discErr = '';
     forgetDiscovery();
@@ -1915,7 +1965,7 @@ function toast(msg, ok = true) {
   setTimeout(() => el.remove(), ok ? 4000 : 9000);
 }
 
-function renderAll() { renderGlobal(); renderTopology(); renderServices(); renderEvents(); renderSettings(); renderSetup(); renderPanel(); }
+function renderAll() { renderGlobal(); renderTopology(); renderEvents(); renderSettings(); renderSetup(); renderPanel(); }
 
 async function post(path, body, done, key, value = true) {
   pending.set(key, value);
@@ -1987,6 +2037,7 @@ function tickLive() {
   const stale = lastOk <= 0 || s > 20;
   live.classList.toggle('stale', stale);
   $('liveText').textContent = lastOk <= 0 ? 'Sem ligação ao agente' : stale ? `Sem resposta há ${s} s` : `Atualizado há ${s} s`;
+  renderHud();
 }
 
 document.addEventListener('click', async e => {

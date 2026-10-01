@@ -25,13 +25,52 @@ type mirrorDir struct {
 func (a *Agent) getMirror(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	root := filepath.Join(a.cfg.Paths.MirrorSubvol, a.cfg.Paths.MirrorRoot)
-	npm := a.cfg.NPM.Dir
+	npm, ignored := a.cfg.NPM.Dir, a.cfg.Ignored
 	a.mu.Unlock()
 	out := []mirrorDir{}
 	for _, d := range mirrorDirs(root, npm) {
-		out = append(out, mirrorDir{d})
+		if !slices.Contains(ignored, d) {
+			out = append(out, mirrorDir{d})
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// postMirrorIgnore leaves a folder of the mirror out of the discovery and of
+// the mirror's watch (an old container's, still in the backup), or takes it back.
+func (a *Agent) postMirrorIgnore(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Dir    string `json:"dir"`
+		Ignore bool   `json:"ignore"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if !isRel(req.Dir) || strings.Contains(req.Dir, "..") || strings.Contains(req.Dir, "/") {
+		http.Error(w, "tem de ser uma pasta do espelho", http.StatusBadRequest)
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if req.Ignore && slices.ContainsFunc(a.cfg.Services, func(s Service) bool { return s.Dir == req.Dir }) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a pasta " + req.Dir + " é de um serviço protegido: remove-o primeiro"})
+		return
+	}
+	next := a.cfg
+	next.Ignored = slices.DeleteFunc(slices.Clone(a.cfg.Ignored), func(d string) bool { return d == req.Dir })
+	msg := "pasta " + req.Dir + " já não é ignorada"
+	if req.Ignore {
+		next.Ignored = append(next.Ignored, req.Dir)
+		slices.Sort(next.Ignored)
+		msg = "pasta " + req.Dir + " ignorada"
+	}
+	if err := saveConfig(a.cfgPath, &next); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guardar configuração: " + err.Error()})
+		return
+	}
+	a.cfg = next
+	a.st.MirrorNew = slices.DeleteFunc(a.st.MirrorNew, func(d string) bool { return d == req.Dir })
+	a.done(w, "", msg)
 }
 
 func (a *Agent) getServiceOverride(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +201,7 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	} else {
 		next.Services = append(next.Services, sv)
 	}
+	next.Ignored = slices.DeleteFunc(slices.Clone(a.cfg.Ignored), func(d string) bool { return d == sv.Dir }) // protected: not ignored
 	if err := next.validate(); err != nil {
 		var fe *FieldError
 		if errors.As(err, &fe) {
@@ -178,6 +218,10 @@ func (a *Agent) postService(w http.ResponseWriter, r *http.Request) {
 	compose := filepath.Join(next.Paths.MirrorSubvol, next.Paths.MirrorRoot, sv.Dir, "docker-compose.yml")
 	if !fileExists(compose) {
 		fieldErr(w, "dir", "não há docker-compose.yml nesta pasta do espelho")
+		return
+	}
+	if clustered(compose) {
+		fieldErr(w, "dir", "o Technitium corre em cluster no servidor e no TNAS: nunca faz failover")
 		return
 	}
 	undo := func() {}

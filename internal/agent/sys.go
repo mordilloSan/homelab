@@ -120,13 +120,23 @@ func (RealSys) PortFree(proto, addr string) error {
 // Resolve asks the DNS resolver at ip for a name no cache holds, so the answer
 // has to come from the internet; NXDOMAIN counts as reached.
 func (RealSys) Resolve(ip string) error {
+	return lookupAt(ip, rand.Text()+".docker.io.") // rooted: no search domains
+}
+
+// Answers asks the DNS server at ip for a name of its own zone: any answer,
+// "no such name" too, says it is up, with or without the internet.
+func (RealSys) Answers(ip, zone string) error {
+	return lookupAt(ip, rand.Text()+"."+zone+".")
+}
+
+func lookupAt(ip, name string) error {
 	d := &net.Dialer{Timeout: 5 * time.Second}
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return d.DialContext(ctx, network, net.JoinHostPort(ip, "53"))
 	}}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	_, err := r.LookupHost(ctx, rand.Text()+".docker.io.") // rooted: no search domains
+	_, err := r.LookupHost(ctx, name)
 	if de, ok := errors.AsType[*net.DNSError](err); ok && de.IsNotFound {
 		return nil
 	}

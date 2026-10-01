@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,37 @@ func TestVerdict(t *testing.T) {
 	a.checkReady()
 	if a.st.Verdict.Problems != nil || !hasEvent(a, "pronto para failover outra vez") {
 		t.Fatalf("tudo bem outra vez: %q", a.st.Verdict.Problems)
+	}
+}
+
+// A folder ignored by hand (an old container's, still in the backup) leaves
+// the folder list and the mirror's watch; a protected one is not ignored.
+func TestMirrorIgnore(t *testing.T) {
+	a, _ := svcSetup(t)
+	a.cfg.Services = append(a.cfg.Services, Service{Name: "nextcloud", Dir: "nextcloud", Host: "cloud.engmariz.com", WaitMin: 5})
+	if code, _ := postTo(t, a.postMirrorIgnore, `{"dir":"nextcloud","ignore":true}`); code != http.StatusConflict {
+		t.Fatalf("ignorou a pasta de um serviço protegido: HTTP %d", code)
+	}
+	if code, _ := postTo(t, a.postMirrorIgnore, `{"dir":"../x","ignore":true}`); code != http.StatusBadRequest {
+		t.Fatalf("fora do espelho: HTTP %d", code)
+	}
+	a.st.MirrorNew = []string{"paperless"}
+	if code, body := postTo(t, a.postMirrorIgnore, `{"dir":"paperless","ignore":true}`); code != http.StatusNoContent || !slices.Equal(a.cfg.Ignored, []string{"paperless"}) || len(a.st.MirrorNew) != 0 {
+		t.Fatalf("HTTP %d %s: %v %v", code, body, a.cfg.Ignored, a.st.MirrorNew)
+	}
+	if b, _ := os.ReadFile(a.cfgPath); !strings.Contains(string(b), "- paperless") {
+		t.Fatalf("não ficou gravado:\n%s", b)
+	}
+	w := httptest.NewRecorder()
+	a.getMirror(w, httptest.NewRequest(http.MethodGet, "/api/mirror", nil))
+	if strings.Contains(w.Body.String(), "paperless") {
+		t.Fatalf("a pasta ignorada continua na lista: %s", w.Body)
+	}
+	a.Tick(t0)
+	if _, ok := a.st.MirrorSeen["paperless"]; ok || len(a.st.MirrorSeen) != 2 {
+		t.Fatalf("a vigia olha para a pasta ignorada: %v", a.st.MirrorSeen)
+	}
+	if code, _ := postTo(t, a.postMirrorIgnore, `{"dir":"paperless","ignore":false}`); code != http.StatusNoContent || len(a.cfg.Ignored) != 0 {
+		t.Fatalf("deixar de ignorar: HTTP %d %v", code, a.cfg.Ignored)
 	}
 }
