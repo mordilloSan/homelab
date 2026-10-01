@@ -12,10 +12,11 @@
 <body>
 <main>
   <header class="top">
-    <div class="brand-row"><a class="brand" href="#/" title="Visão geral"><span class="logo" data-icon="swap"></span><h1>Failover do homelab</h1></a>
+    <div class="brand-row"><a class="brand" href="#/" title="Visão geral"><span class="logo" data-icon="swap"></span></a>
       <a class="version" id="version" target="_blank" rel="noopener" title="Esta versão no GitHub"></a></div>
     <div class="top-meta">
-      <span class="live" id="live"><span class="dot"></span><span id="liveText">A ligar ao agente…</span></span>
+      <span class="live" id="live" role="status" hidden><span class="dot"></span>Sem ligação ao agente</span>
+      <button type="button" class="icon-btn maint-btn" id="maintBtn" aria-pressed="false" data-icon="wrench"></button>
       <a class="icon-btn" href="#/definicoes" aria-label="Definições" title="Definições" data-icon="cog"></a>
       <button class="icon-btn" data-logout aria-label="Sair" title="Sair (sai sozinho após 30 min sem atividade)" data-icon="logout"></button>
     </div>
@@ -38,10 +39,6 @@
       <div class="node" id="nodeServer"></div>
       <div class="lane" id="lane"></div>
       <div class="node" id="nodeTnas"></div>
-    </div>
-    <div class="hero-foot">
-      <label class="toggle"><input type="checkbox" role="switch" class="switch" id="maintGlobal"> <span id="maintGlobalText">Manutenção global</span></label>
-      <label class="duration">durante <input type="number" id="maintMin" min="1" max="10080" value="60"> min</label>
     </div>
   </section>
 
@@ -96,6 +93,27 @@
     <div class="dlg-foot">
       <button class="btn" value="cancel">Cancelar</button>
       <button class="btn contained" value="ok" id="dlgOk"></button>
+    </div>
+  </form>
+</dialog>
+<dialog id="maintDlg" aria-labelledby="maintTitle">
+  <form id="maintForm">
+    <h2 id="maintTitle" class="dlg-title-icon"><span data-icon="wrench"></span>Manutenção do servidor</h2>
+    <p>Enquanto durar, nenhum failover começa: um serviço que falhe fica no servidor. Os regressos ao servidor continuam.</p>
+    <div class="maint-dur">
+      <label for="maintMin">Durante</label>
+      <input type="number" id="maintMin" min="1" max="10080" value="60" required> <span>min</span>
+      <span class="muted" id="maintEnds"></span>
+    </div>
+    <div class="maint-presets">
+      <button type="button" class="preset" data-m="30">30 min</button>
+      <button type="button" class="preset" data-m="60">1 h</button>
+      <button type="button" class="preset" data-m="120">2 h</button>
+      <button type="button" class="preset" data-m="240">4 h</button>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" id="maintCancel">Cancelar</button>
+      <button type="submit" class="btn contained">Ligar manutenção</button>
     </div>
   </form>
 </dialog>

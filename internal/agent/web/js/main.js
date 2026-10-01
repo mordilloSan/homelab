@@ -1,5 +1,5 @@
 // The entry point: refresh, the page-wide controls, the router and the timers.
-import {$, confirmAction, dur, lastOk, post, setLastOk, setStatus, st, toLogin} from './core.js';
+import {$, clock, confirmAction, dur, lastOk, post, setLastOk, setStatus, st, toLogin} from './core.js';
 import {renderGlobal, renderHud, renderTopology, renderWires} from './topology.js';
 import {loadEvents, renderEvents} from './events.js';
 import {openPanel, renderPanel} from './panels.js';
@@ -20,13 +20,8 @@ export async function refresh() {
     if (pageVersion && st.version !== pageVersion) { location.reload(); return; }
     pageVersion = st.version;
     setLastOk(Date.now());
-    const live = $('live');
-    live.classList.remove('ping');
-    void live.offsetWidth; // restart the ripple
-    live.classList.add('ping');
     renderAll();
     if (first) {
-      $('maintMin').value = st.default_expiry_min || 60;
       if (st.setup_pending && !location.hash) location.hash = '#/assistente'; // a new install starts with the guide
       route();
     }
@@ -36,12 +31,9 @@ export async function refresh() {
   tickLive();
 }
 
+// Only a lost connection is said: a page that stopped would otherwise look fine.
 export function tickLive() {
-  const live = $('live');
-  const s = Math.round((Date.now() - lastOk) / 1000);
-  const stale = lastOk <= 0 || s > 20;
-  live.classList.toggle('stale', stale);
-  $('liveText').textContent = lastOk <= 0 ? 'Sem ligação ao agente' : stale ? `Sem resposta há ${s} s` : `Atualizado há ${s} s`;
+  $('live').hidden = lastOk > 0 && Date.now() - lastOk <= 20000;
   renderHud();
 }
 
@@ -57,6 +49,9 @@ document.addEventListener('click', async e => {
   if (open) { openPanel(open.dataset.panel, open.dataset.svc, open.dataset.prefill); return; }
   if (e.target.closest('[data-pw]')) { openPw(); return; }
   if (e.target.closest('[data-logout]')) { logout(); return; }
+  if (e.target.closest('#maintBtn')) { maintClick(); return; }
+  const pre = e.target.closest('.preset');
+  if (pre) { $('maintMin').value = pre.dataset.m; maintEnds(); return; }
   if (e.target.closest('button[data-scan]')) { post('api/images', {}, 'A verificar as imagens no TNAS', 'images'); return; }
   const b = e.target.closest('button[data-act]');
   if (b) forceAction(b.dataset.svc, b.dataset.act);
@@ -73,6 +68,31 @@ export async function forceAction(svc, act) {
   return yes;
 }
 
+// The server's maintenance: the header's button opens the dialog to turn it
+// on for a while; pressed again, it turns it off.
+function maintClick() {
+  if (st.maint_until) {
+    post('api/maintenance', {service: '', minutes: 0}, 'Manutenção do servidor desligada', 'maint:', false);
+    return;
+  }
+  $('maintMin').value = st.default_expiry_min || 60;
+  maintEnds();
+  $('maintDlg').showModal();
+  $('maintMin').select();
+}
+function maintEnds() {
+  const m = Number($('maintMin').value);
+  $('maintEnds').textContent = m > 0 ? `termina às ${clock(Date.now() + m * 60000)}` : '';
+  document.querySelectorAll('.preset').forEach(p => p.setAttribute('aria-pressed', String(Number(p.dataset.m) === m)));
+}
+$('maintMin').addEventListener('input', maintEnds);
+$('maintCancel').addEventListener('click', () => $('maintDlg').close());
+$('maintForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const minutes = Number($('maintMin').value);
+  $('maintDlg').close();
+  post('api/maintenance', {service: '', minutes}, `Manutenção do servidor ligada por ${dur(minutes)}`, 'maint:', true);
+});
 
 document.addEventListener('change', async e => {
   const sel = e.target.closest('select[data-min]');
@@ -99,10 +119,10 @@ document.addEventListener('change', async e => {
   }
   const sw = e.target.closest('input.switch');
   if (!sw) return;
-  const svc = sw.id === 'maintGlobal' ? '' : sw.dataset.maint;
-  const minutes = sw.checked ? Number($('maintMin').value) : 0;
-  const what = svc ? `Manutenção de ${svc}` : 'Manutenção global';
-  post('api/maintenance', {service: svc, minutes}, minutes ? `${what} ligada por ${dur(minutes)}` : `${what} desligada`, `maint:${svc}`, sw.checked);
+  const svc = sw.dataset.maint;
+  if (!svc) return;
+  const minutes = sw.checked ? st.default_expiry_min || 60 : 0;
+  post('api/maintenance', {service: svc, minutes}, minutes ? `Manutenção de ${svc} ligada por ${dur(minutes)}` : `Manutenção de ${svc} desligada`, `maint:${svc}`, sw.checked);
 });
 
 
