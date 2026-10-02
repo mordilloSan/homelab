@@ -352,14 +352,23 @@ func TestEventsAPI(t *testing.T) {
 	}
 }
 
-// The page's stylesheet and modules are served, with their types.
+// The page's stylesheet and modules are served with their types, gzipped,
+// and an unchanged one is a 304.
 func TestAssets(t *testing.T) {
 	a, _ := setup(t)
 	for path, ctype := range map[string]string{"/app.css": "text/css", "/js/main.js": "text/javascript"} {
+		r := withSession(a, httptest.NewRequest(http.MethodGet, path, nil))
+		r.Header.Set("Accept-Encoding", "gzip")
 		w := httptest.NewRecorder()
-		a.Handler().ServeHTTP(w, withSession(a, httptest.NewRequest(http.MethodGet, path, nil)))
-		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), ctype) {
-			t.Fatalf("%s: HTTP %d %s", path, w.Code, w.Header().Get("Content-Type"))
+		a.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), ctype) || w.Header().Get("Content-Encoding") != "gzip" {
+			t.Fatalf("%s: HTTP %d %v", path, w.Code, w.Header())
+		}
+		r.Header.Set("If-None-Match", w.Header().Get("ETag"))
+		w = httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusNotModified {
+			t.Fatalf("%s sem mudanças: HTTP %d", path, w.Code)
 		}
 	}
 }
@@ -450,6 +459,7 @@ func TestFirstAccount(t *testing.T) {
 // unchanged page is a 304; the status goes gzipped too.
 func TestPageGzipAndETag(t *testing.T) {
 	a, _ := setup(t)
+	indexHTML := assets["index.html"].raw
 	get := func(path string, h map[string]string) *httptest.ResponseRecorder {
 		r := withSession(a, httptest.NewRequest(http.MethodGet, path, nil))
 		for k, v := range h {
@@ -470,7 +480,7 @@ func TestPageGzipAndETag(t *testing.T) {
 	if b, _ := io.ReadAll(zr); !bytes.Equal(b, indexHTML) {
 		t.Fatal("o gzip não é a página")
 	}
-	if w := get("/", map[string]string{"If-None-Match": indexETag}); w.Code != http.StatusNotModified || w.Body.Len() != 0 {
+	if w := get("/", map[string]string{"If-None-Match": assets["index.html"].etag}); w.Code != http.StatusNotModified || w.Body.Len() != 0 {
 		t.Fatalf("recarregar sem mudanças: %d, %d bytes", w.Code, w.Body.Len())
 	}
 	if w := get("/", nil); w.Header().Get("Content-Encoding") != "" || !bytes.Equal(w.Body.Bytes(), indexHTML) {
