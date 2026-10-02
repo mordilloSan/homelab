@@ -213,7 +213,7 @@ export function renderTopology() {
   lane.classList.toggle('back', at.moving.length ? back : true);
   $('nodeTnas').classList.toggle('lit', at.tnas.length > 0);
   const auto = st.mode === 'auto';
-  paint('lane', `<span class="flow"></span>
+  paint('lane', `<span class="flow"></span><span class="flow-pkt"></span>
     <div class="lane-under"><span class="lane-label">verifica o servidor a cada ${st.check_interval_s} s</span><a class="chip mode-chip" href="#/definicoes/geral" style="--c:${auto ? 'var(--success)' : 'var(--warning)'}"
       title="${auto ? 'Faz failover e regresso sozinho' : 'Só regista o que faria'}. Mudar em Definições → Geral">${auto ? 'Automático' : 'Modo observação'}</a>
       <div class="lane-pills">${at.moving.map(pill).join('')}</div></div>`);
@@ -293,12 +293,8 @@ export function renderWires() {
   const d = (f, to) => { const k = (to.x - f.x) * .5; return `M ${f.x} ${f.y} C ${f.x + k} ${f.y}, ${to.x - k} ${to.y}, ${to.x} ${to.y}`; };
   const vert = (a, b) => a.y < b.y ? `M ${a.x + a.w / 2} ${a.y + a.h} L ${b.x + b.w / 2} ${b.y}` : `M ${a.x + a.w / 2} ${a.y} L ${b.x + b.w / 2} ${b.y + b.h}`;
   const viaTnas = st.services.filter(x => x.dns).length, viaServer = st.services.length - viaTnas;
-  const wire = (id, path, color, n) => {
-    const on = n > 0;
-    const pkts = on && !reduceMotion.matches ? Array.from({length: Math.min(3, n)}, (_, i) =>
-      `<circle r="3.5" class="pkt"><animateMotion dur="2.4s" begin="${(-i * 0.8).toFixed(1)}s" repeatCount="indefinite"><mpath href="#${id}"/></animateMotion></circle>`).join('') : '';
-    return `<g style="--wc:${color}"><path id="${id}" class="wire ${on ? 'on' : ''}" d="${path}"/>${pkts}</g>`;
-  };
+  // n: how much traffic the wire carries; up to 3 packets travel along it
+  const wire = (id, path, color, n) => `<g style="--wc:${color}"><path id="${id}" class="wire ${n > 0 ? 'on' : ''}" d="${path}" data-n="${n}"/></g>`;
   const nets = Object.values(netState()), net = nets.includes('up') ? 'up' : nets.includes('down') ? 'down' : 'unknown';
   const tone = x => x === 'up' ? 'var(--success)' : x === 'down' ? 'var(--error)' : 'var(--neutral)';
   const dm = dnsMembers(), dnsUp = dm.some(x => x.s === 'up');
@@ -308,7 +304,45 @@ export function renderWires() {
     + wire('wire-dns-net', vert(dn, n), tone(net), net === 'unknown' ? 0 : 1)
     + wire('wire-dns-router', vert(dn, ro), tone(st.router_ok ? 'up' : 'down'), 1);
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
-  if (svg.__html !== html) { svg.__html = html; svg.innerHTML = html; }
+  if (svg.__html !== html) { svg.__html = html; svg.innerHTML = html; wireMotion(svg); }
+}
+
+// The motion along the wires, on the GPU: every dash and packet is an element
+// that only transform moves, on keyframes sampled from its wire (a moving SVG
+// dash or <animateMotion> is repainted on the CPU every frame). The animations
+// run on the page's clock, so a redraw keeps them where they were.
+const DASH = 6, PERIOD = 14; // as the SVG's stroke-dasharray: 6 8
+function wireMotion(svg) {
+  const fx = $('wireFx');
+  fx.replaceChildren();
+  svg.classList.toggle('gpu', !reduceMotion.matches);
+  if (reduceMotion.matches) return; // the dashes stay still, on the SVG
+  const run = (el, frames, opts) => { el.animate(frames, {iterations: Infinity, ...opts}).startTime = 0; };
+  for (const path of svg.querySelectorAll('.wire.on')) {
+    const L = path.getTotalLength(), g = document.createElement('div');
+    g.setAttribute('style', path.parentNode.getAttribute('style')); // its --wc
+    const pt = x => path.getPointAtLength(Math.max(0, Math.min(L, x)));
+    const angle = x => { const a = pt(Math.min(x, L - .5)), b = pt(Math.min(x, L - .5) + .5); return Math.atan2(b.y - a.y, b.x - a.x); };
+    // a dash starting at x along the wire, cut where the wire starts and ends, as the stroke is
+    const dashAt = x => {
+      const from = Math.max(0, x), len = Math.max(0, Math.min(L, x + DASH) - from), p = pt(from);
+      return {transform: `translate(${p.x}px, ${p.y}px) rotate(${angle(from)}rad) scaleX(${len / DASH})`};
+    };
+    for (let x0 = -PERIOD; x0 < L; x0 += PERIOD) { // each moves one period a second, as the dash offset did
+      const el = document.createElement('i');
+      el.className = 'dash';
+      run(el, Array.from({length: 9}, (_, i) => dashAt(x0 + PERIOD * i / 8)), {duration: 1000});
+      g.append(el);
+    }
+    const steps = Math.max(12, Math.ceil(L / 10)), stops = Array.from({length: steps + 1}, (_, i) => { const p = pt(L * i / steps); return {transform: `translate(${p.x}px, ${p.y}px)`}; });
+    for (let i = 0; i < Math.min(3, +path.dataset.n); i++) { // at an even pace, 0.8 s apart, as <animateMotion> did
+      const el = document.createElement('i');
+      el.className = 'pkt';
+      run(el, stops, {duration: 2400, delay: -i * 800});
+      g.append(el);
+    }
+    fx.append(g);
+  }
 }
 
 // Every check the agent makes (it runs on the TNAS) crosses the link to the

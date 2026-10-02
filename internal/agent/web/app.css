@@ -235,9 +235,14 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 /* the wires from the clients; packets travel along the ones carrying traffic */
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .wire { fill: none; stroke: var(--divider); stroke-width: 2; }
-.wire.on { stroke: color-mix(in srgb, var(--wc), transparent 50%); stroke-dasharray: 6 8; animation: wire 1s linear infinite; }
-@keyframes wire { to { stroke-dashoffset: -14; } }
-.pkt { fill: var(--wc); filter: drop-shadow(0 0 4px var(--wc)); }
+.wire.on { stroke: color-mix(in srgb, var(--wc), transparent 50%); stroke-dasharray: 6 8; }
+/* moving, the dashes and packets are elements that only transform moves (on the GPU), drawn over the
+   wire by renderWires; the SVG keeps the still dashes for reduced motion */
+.wires.gpu .wire.on { stroke: none; }
+.wire-fx { position: absolute; inset: 0; pointer-events: none; }
+.wire-fx i { position: absolute; left: 0; top: 0; }
+.wire-fx .dash { width: 6px; height: 2px; margin-top: -1px; transform-origin: 0 50%; background: color-mix(in srgb, var(--wc), transparent 50%); }
+.wire-fx .pkt { width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: var(--wc); box-shadow: 0 0 4px var(--wc); }
 .node, .lane { position: relative; z-index: 1; }
 .probe { position: absolute; left: 50%; top: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--pc);
   box-shadow: 0 0 12px 3px color-mix(in srgb, var(--pc), transparent 40%); pointer-events: none; }
@@ -274,13 +279,21 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
   background: color-mix(in srgb, var(--text), transparent 90%); }
 .node-icon .icon { width: 22px; height: 22px; }
 /* the machine's state, breathing: green up, amber degraded, red down, grey unknown */
-.node-icon.st { --sc: var(--neutral); color: var(--sc); background: color-mix(in srgb, var(--sc), transparent 82%);
+.node-icon.st { --sc: var(--neutral); position: relative; color: var(--sc); background: color-mix(in srgb, var(--sc), transparent 82%);
   transition: color .4s, background-color .4s; }
-.node-icon.st-up { --sc: var(--success); animation: halo 2.8s ease-out infinite, glow 2.8s ease-in-out infinite; }
-.node-icon.st-warn { --sc: var(--warning); animation: halo 1.6s ease-out infinite, glow 1.6s ease-in-out infinite; }
-.node-icon.st-down { --sc: var(--error); animation: halo 1s ease-out infinite, glow 1s ease-in-out infinite; }
-@keyframes halo { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc), transparent 50%); } 70%, to { box-shadow: 0 0 0 8px transparent; } }
-@keyframes glow { 50% { background-color: color-mix(in srgb, var(--sc), transparent 68%); } }
+.node-icon.st .icon { position: relative; }
+.node-icon.st-up { --sc: var(--success); --beat: 2.8s; }
+.node-icon.st-warn { --sc: var(--warning); --beat: 1.6s; }
+.node-icon.st-down { --sc: var(--error); --beat: 1s; }
+/* the breathing, on the GPU: a layer of the colour fades in and out (the glow: 18% of the colour to 32%)
+   and a ring grows out of the edge and fades (the halo); only opacity and transform change */
+:is(.st-up, .st-warn, .st-down).node-icon::before, :is(.st-up, .st-warn, .st-down).node-icon::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: 0; pointer-events: none; }
+:is(.st-up, .st-warn, .st-down).node-icon::before { background: var(--sc); animation: glow var(--beat) ease-in-out infinite; }
+:is(.st-up, .st-warn, .st-down).node-icon::after { box-shadow: 0 0 0 4px color-mix(in srgb, var(--sc), transparent 50%);
+  animation: halo var(--beat) ease-out infinite; }
+@keyframes glow { 50% { opacity: .17; } }
+@keyframes halo { 8% { opacity: 1; } 70%, to { opacity: 0; transform: scale(1.17); } }
 .node-title { font-size: 15px; font-weight: 600; }
 /* the chip wraps to the right when the head is narrow */
 .node-end { display: flex; align-items: center; gap: 12px; margin-left: auto; }
@@ -323,17 +336,22 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .lane { --fc: var(--success); }
 .lane.down { --fc: var(--error); }
 .lane.moving { --fc: var(--warning); }
-.flow { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+/* both move by transform only (on the GPU): the dashes are a strip 12px taller than the link, slid down
+   one period and clipped; the packet rides a box as tall as its path, slid down its own height */
+.flow { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; overflow: hidden; }
+.flow::before { content: ""; position: absolute; inset: -12px 0 0;
   background: repeating-linear-gradient(180deg, var(--divider) 0 6px, transparent 6px 12px); }
-.lane.active .flow { background-image: repeating-linear-gradient(180deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
+.lane.active .flow::before { background-image: repeating-linear-gradient(180deg, color-mix(in srgb, var(--fc), transparent 35%) 0 6px, transparent 6px 12px);
   animation: flow .8s linear infinite; }
-.flow::after { content: ""; position: absolute; top: 0; left: -3px; width: 8px; height: 8px; border-radius: 50%; opacity: 0;
+.flow-pkt { position: absolute; left: 50%; top: 0; width: 8px; height: calc(100% - 8px); margin-left: -4px; pointer-events: none; }
+.flow-pkt::after { content: ""; position: absolute; top: 0; left: 0; width: 8px; height: 8px; border-radius: 50%; opacity: 0;
   background: var(--fc); box-shadow: 0 0 10px 2px color-mix(in srgb, var(--fc), transparent 40%); }
-.lane.active .flow::after { opacity: 1; animation: packet 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
-.lane.back .flow, .lane.back .flow::after { animation-direction: reverse; }
-@keyframes flow { to { background-position: 0 12px; } }
-@keyframes packet { from { top: 0; } to { top: calc(100% - 8px); } }
-.lane > :not(.flow, .probe) { position: relative; }
+.lane.active .flow-pkt { animation: packet 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
+.lane.active .flow-pkt::after { opacity: 1; }
+.lane.back .flow::before, .lane.back .flow-pkt { animation-direction: reverse; }
+@keyframes flow { to { transform: translateY(12px); } }
+@keyframes packet { to { transform: translateY(100%); } }
+.lane > :not(.flow, .flow-pkt, .probe) { position: relative; }
 
 /* services */
 /* under the topology: the services, then the events with their own scroll */
@@ -477,7 +495,7 @@ dialog.sheet[open]::backdrop { animation: fade-in .32s ease; }
   /* one column: the clients, the three hops side by side, then the server over the TNAS */
   .topo { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "clients clients clients" "internet dns router"
     "server server server" "lane lane lane" "tnas tnas tnas"; column-gap: 6px; row-gap: 0; }
-  .wires { display: none; }
+  .wires, .wire-fx { display: none; }
   .clients { margin-bottom: 14px; }
   .clients.hop { align-self: stretch; padding: 6px 8px; gap: 6px; border-radius: 12px; white-space: normal; min-width: 0; }
   .hop .node-icon { display: none; }
