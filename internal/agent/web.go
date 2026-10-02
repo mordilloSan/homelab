@@ -13,9 +13,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,12 +26,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-//go:embed web/index.html
-var indexHTML []byte
-
-// The page's stylesheet and its JS modules, served next to it.
+// The page, its stylesheet and its JS modules.
 //
-//go:embed web/app.css web/js
+//go:embed web/index.html web/app.css web/js
 var webFS embed.FS
 
 // The app's icon (the header's logo, with room around it for a phone's mask)
@@ -40,12 +39,37 @@ var (
 "background_color":"#1b2635","theme_color":"#1b2635","icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}`)
 )
 
-// The page, gzipped once, and its ETag: a reload that finds it unchanged is
-// a 304 of a few bytes instead of 140 KB.
-var (
-	indexGz   = gzipBytes(indexHTML)
-	indexETag = func() string { h := sha256.Sum256(indexHTML); return `"` + hex.EncodeToString(h[:8]) + `"` }()
-)
+// asset is one of webFS's files, gzipped once, with its ETag: a reload that
+// finds it unchanged is a 304 of a few bytes instead of 150 KB in all.
+type asset struct {
+	raw, gz     []byte
+	ctype, etag string
+}
+
+// assets by the path the page asks for: "index.html", "app.css", "js/main.js".
+var assets = func() map[string]asset {
+	m := map[string]asset{}
+	_ = fs.WalkDir(webFS, "web", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, _ := webFS.ReadFile(p)
+		h := sha256.Sum256(raw)
+		m[strings.TrimPrefix(p, "web/")] = asset{raw, gzipBytes(raw), mime.TypeByExtension(path.Ext(p)), `"` + hex.EncodeToString(h[:8]) + `"`}
+		return nil
+	})
+	return m
+}()
+
+func (s asset) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache") // kept, but asked again each time: an update shows at once
+	w.Header().Set("ETag", s.etag)
+	if r.Header.Get("If-None-Match") == s.etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeBody(w, r, s.ctype, s.raw, s.gz)
+}
 
 func gzipBytes(b []byte) []byte {
 	var buf bytes.Buffer
@@ -74,19 +98,12 @@ var interFont []byte
 
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux() // everything here needs a session
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache") // kept, but asked again each time: an update shows at once
-		w.Header().Set("ETag", indexETag)
-		if r.Header.Get("If-None-Match") == indexETag {
-			w.WriteHeader(http.StatusNotModified)
-			return
+	for p, s := range assets {
+		if p == "index.html" {
+			p = "{$}"
 		}
-		writeBody(w, r, "text/html; charset=utf-8", indexHTML, indexGz)
-	})
-	web, _ := fs.Sub(webFS, "web") // cannot fail: "web" is a valid path
-	assets := http.FileServerFS(web)
-	mux.Handle("GET /app.css", assets)
-	mux.Handle("GET /js/", assets)
+		mux.Handle("GET /"+p, s)
+	}
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		v := a.view.Load()
 		writeBody(w, r, "application/json", v.raw, v.gz)

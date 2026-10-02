@@ -6,6 +6,7 @@ import {openPanel, renderPanel} from './panels.js';
 import {forgetDiscovery, renderSettings, repaintSec, secs} from './settings.js';
 import {renderSetup} from './setup.js';
 import {logout, openPw} from './account.js';
+import './dnd.js'; // dragging a service between the boxes: it listens on its own
 
 export function renderAll() { renderGlobal(); renderTopology(); renderEvents(); renderSettings(); renderSetup(); renderPanel(); }
 

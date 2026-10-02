@@ -8,7 +8,7 @@ export const SVC_ICON = {vaultwarden: 'shield', homepage: 'dashboard', speedtest
 // or dashboard-icons by name), else one of the page's own.
 export const svcIcon = name => {
   const v = st?.services.find(x => x.name === name)?.icon_v;
-  return v ? `<img class="icon svc-img" src="icons/${encodeURIComponent(name)}?v=${esc(v)}" alt="">` : icon(SVC_ICON[name] || 'cube');
+  return v ? `<img class="icon svc-img" src="icons/${encodeURIComponent(name)}?v=${esc(v)}" alt="" draggable="false">` : icon(SVC_ICON[name] || 'cube');
 };
 export const STATES = {
   NORMAL: {label: 'No servidor', c: 'var(--success)'},
