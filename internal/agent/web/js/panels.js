@@ -58,7 +58,7 @@ export function tnasPanel() {
     head: `<span class="node-icon st st-${tnasHealth().s}" title="${esc(tnasHealth().why)}">${icon('nas')}</span><div class="node-id"><h2 id="panelTitle">TNAS</h2>${mono(st.tnas_ip)}</div>${tnasChip()}`,
     body: (st.verdict?.at ? sec('Pronto para failover', (st.verdict.problems?.length
         ? notesHtml(st.verdict.problems) : `<p class="ok-text">${icon('check')} Nada em falta.</p>`)
-        + `<p class="note-text">Verificado às ${esc(clock(st.verdict.at))}: o token do Technitium, um snapshot de teste do espelho, as imagens e o que o TNAS precisa para cada compose (redes externas, portas livres).</p>`) : '')
+        + `<p class="note-text">Verificado às ${esc(clock(st.verdict.at))}: o token do Technitium, a app Failover e o *.${esc(st.dns_zone)}, um snapshot de teste do espelho, as imagens e o que o TNAS precisa para cada compose (redes externas, portas livres).</p>`) : '')
       + sec('Estado', kv([
         ['Agente', `<span class="ok-text">A correr</span>, versão ${mono(st.version)}. É ele que serve esta página`],
         st.mirror_changed && ['Espelho', st.mirror_stale ? `<span class="warn-text">Parado desde ${esc(when(st.mirror_changed))}: o backup do TOS parou?</span>`
@@ -67,12 +67,12 @@ export function tnasPanel() {
         ['Router', st.router_ok ? `<span class="ok-text">Acessível</span> ${mono(st.router_ip)}` : `<span class="bad-text">Inacessível</span> ${mono(st.router_ip)}`],
       ]) + '<p class="note-text">O TNAS está na LAN quando o próprio IP responde e chega ao router. Um ping ao próprio IP não sai da máquina: sozinho só confirma que o IP está ativo.</p>')
       + sec('NPM do TNAS', kv([
-        ['Estado', !n.snapshot && !n.server_down ? 'Parado, à espera de um failover ou do servidor em baixo' : n.ok ? '<span class="ok-text">A servir</span>' : '<span class="warn-text">A arrancar</span>'],
-        n.server_down && ['Porquê', `O servidor está em baixo: serve o que o Technitium manda para o TNAS${st.dns_zone ? ` (${mono('*.' + st.dns_zone)})` : ''}`],
+        ['Estado', !n.snapshot && !n.stand_in ? 'Parado, à espera de um failover ou do NPM do servidor em falha' : n.ok ? '<span class="ok-text">A servir</span>' : '<span class="warn-text">A arrancar</span>'],
+        n.stand_in && ['Porquê', `O NPM do servidor não responde: serve o que a app Failover do Technitium manda para o TNAS${st.dns_zone ? ` (${mono('*.' + st.dns_zone)})` : ''}`],
         n.msg && ['Problema', `<span class="warn-text">${esc(n.msg)}</span>`],
         n.snapshot && ['Snapshot', mono(n.snapshot)],
         n.snapshot && ['Desde', esc(when(n.since))],
-      ]) + '<p class="note-text">Arranca a partir de um snapshot do espelho com o primeiro failover, ou com o servidor inteiro em baixo há 1 min: a app Failover do Technitium manda então o resto dos nomes para o TNAS. Para quando o NPM do servidor responde e já nenhuma cópia precisa dele.</p>')
+      ]) + '<p class="note-text">Arranca a partir de um snapshot do espelho com o primeiro failover, ou com o NPM do servidor sem resposta há 1 min: a app Failover do Technitium manda então o resto dos nomes para o TNAS. Para quando o NPM do servidor responde e já nenhuma cópia precisa dele.</p>')
       + sec('Cópias a correr', copies.length ? `<ul class="list">${copies.map(s => `<li><span style="color:${look(s).c}">${svcIcon(s.name)}</span>
           <span class="grow"><button class="svc-open" data-panel="svc" data-svc="${esc(s.name)}">${esc(s.name)}</button>
           <span class="mono muted">${esc((s.snapshot || '').split('/').pop())}</span></span>

@@ -85,7 +85,20 @@ export function sectionHtml(sec) {
       <form class="token-form"><label class="pw-field">${st.dns_token ? 'Substituir o token' : 'Token da API do Technitium'}
           <input type="password" class="dns-token" autocomplete="off" required></label>
         <p class="bad-text token-err" role="alert"></p>
-        <div class="form-foot"><button type="submit" class="btn contained">Testar e gravar</button></div></form></div>` : ''}`;
+        <div class="form-foot"><button type="submit" class="btn contained">Testar e gravar</button></div></form></div>
+    ${failoverAppHtml()}` : ''}`;
+}
+
+// The zone's * as a record of the Technitium's Failover app: what the readiness
+// found wrong with it, and the button that writes it.
+export function failoverAppHtml() {
+  const fixes = (st.verdict?.problems || []).filter(p => p.includes('Definições → DNS'));
+  const busy = pending.has('failoverApp');
+  return `<div class="sec-sub"><p class="note-text">O ${mono('*.' + st.dns_zone)} é um registo da app Failover do Technitium: aponta para o servidor
+      (${mono(st.server_ip)}) enquanto o NPM dele responde na porta 443, e para o TNAS (${mono(st.tnas_ip)}) quando não responde.</p>
+    ${!st.verdict?.at ? '' : fixes.length ? `<ul class="checks">${fixes.map(p => `<li class="warn-text">${icon('alert')}<span>${esc(sentence(p))}</span></li>`).join('')}</ul>`
+      : `<p class="ok-text">${icon('check')} A app está instalada e o ${mono('*.' + st.dns_zone)} está como deve.</p>`}
+    <div class="form-foot"><button type="button" class="btn${busy ? ' busy' : ''}" data-failover-app ${busy ? 'disabled' : ''}>${icon('dns')}Configurar no Technitium</button></div></div>`;
 }
 
 // Settings, as a page, one card per section. A section with changes not yet
@@ -257,6 +270,12 @@ document.addEventListener('click', async e => {
   }
   const det = e.target.closest('[data-detect]');
   if (det) detectInto(det.closest('form.set-form'));
+  if (e.target.closest('[data-failover-app]')) {
+    if (!await confirmAction(`Configurar o *.${st.dns_zone} no Technitium?`, `Instala a app Failover em cada Technitium que responda e grava o *.${st.dns_zone} como registo da app: o servidor ${st.server_ip} enquanto o NPM dele responder na porta 443, o TNAS ${st.tnas_ip} quando não. Um registo A no * sai a seguir.`, 'Configurar')) return;
+    await post('api/technitium/failover', {}, `*.${st.dns_zone} configurado no Technitium`, 'failoverApp');
+    painted['set-dns'] = null;
+    renderSettings();
+  }
 });
 // Definições → Rede → Detetar: fills the form with what was found, not saved.
 export async function detectInto(form) {

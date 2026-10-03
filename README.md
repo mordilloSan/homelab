@@ -8,8 +8,8 @@ A cada verificação (60 s por defeito), o agente pede `https://<serviço>` ao N
 
 1. Um serviço que falha durante a **espera antes do failover** (2 min por defeito) passa para o TNAS: snapshot do espelho, as imagens em falta descarregadas, `docker compose up` da cópia, verificação da cópia pelo NPM do TNAS (a cada 5 s, até responder) e registo DNS. Cada passo fica com a hora e aparece na página enquanto acontece.
 2. Quando volta a responder no servidor durante a **estabilidade antes do regresso** (2 min), o agente repõe o DNS e remove a cópia e o snapshot.
-3. Com o router em baixo, o agente não decide nada. Com o NPM do servidor em baixo mas o servidor vivo, só avisa.
-4. Com o servidor inteiro em baixo há 1 min (nem NPM nem ping), o NPM do TNAS liga-se, mesmo sem nenhum serviço em failover. A [app Failover do Technitium](#o--da-zona-no-technitium) manda então o resto dos nomes (`*`) para o TNAS: o que não vive no servidor, como a interface do TNAS ou do router, continua acessível, e o que só existe no servidor dá 502 em vez de ficar à espera. O NPM do TNAS desliga-se quando o NPM do servidor volta e nenhuma cópia precisa dele.
+3. Com o router em baixo, o agente não decide nada. Com o NPM do servidor em baixo mas o servidor vivo, os serviços ficam no servidor e o agente avisa.
+4. Com o NPM do servidor sem resposta há 1 min, com o servidor ligado ou não, o NPM do TNAS liga-se, mesmo sem nenhum serviço em failover. A [app Failover do Technitium](#o--da-zona-no-technitium) manda então o resto dos nomes (`*`) para o TNAS: o que não vive no servidor, como a interface do TNAS ou do router, continua acessível, e o que só existe no servidor dá 502 em vez de ficar à espera. O NPM do TNAS desliga-se quando o NPM do servidor volta e nenhuma cópia precisa dele.
 5. Um failover que dá erro é tentado outra vez a cada `start_timeout_min` (10 min) enquanto o serviço não responder no servidor, em automático e fora de manutenção.
 
 Em **observação** só regista nos eventos o que faria. Em **automático** faz tudo sozinho.
@@ -28,24 +28,24 @@ docker compose pull && docker compose up -d
 
 ### O `*` da zona no Technitium
 
-O agente só muda os nomes dos serviços que passa para o TNAS. O resto da zona segue o registo `*`, e é a app **Failover** do Technitium que o manda para o TNAS quando o servidor cai:
+O agente só muda os nomes dos serviços que passa para o TNAS. O resto da zona segue o registo `*`, e é a app **Failover** do Technitium que o manda para o TNAS quando o NPM do servidor deixa de responder:
 
 1. **O DNS do próprio TNAS:** no TOS, nas definições de rede, põe `192.168.1.249` primeiro e `192.168.1.66` depois. Só com o `.66`, o TNAS fica sem nomes quando o servidor cai: o NPM do TNAS não instala os plugins do certbot e os emails não saem.
-2. Nos **dois** Technitium: Apps → App Store → instala **Failover**.
-3. No Technitium do TNAS (o primário da zona), em Zones → `engmariz.com`: apaga o `*` A `192.168.1.66` (com ele lá, a app é ignorada) e adiciona um registo `*`, tipo **APP**, TTL `60`, app **Failover**, classe `Failover.Address`, com estes dados:
+2. Em ⚙ Definições → DNS → **Configurar no Technitium**, o agente instala a app Failover em cada Technitium do cluster que responda e grava o `*` como registo da app (TTL do registo, `Failover.Address`). Um `*` A que lá esteja sai a seguir, porque com ele a app é ignorada. Os dados do registo:
 
    ```json
    {
      "primary": ["192.168.1.66"],
      "secondary": ["192.168.1.249"],
      "serverDown": ["192.168.1.249"],
-     "healthCheck": "ping",
+     "healthCheck": "tcp443",
      "healthCheckUrl": null,
      "allowTxtStatus": true
    }
    ```
 
-   O `ping` só troca com o servidor desligado. O `tcp443` também trocava com o servidor vivo e só o NPM em baixo, e aí o agente só avisa. O `serverDown` mantém o TNAS mesmo que o teste ao `.249` falhe. A app testa a cada 60 s, 3 vezes: troca uns 3 min depois da queda.
+   O `tcp443` testa o NPM do servidor e não só a máquina: um servidor ligado sem os containers também manda os nomes para o TNAS. O `serverDown` mantém o TNAS mesmo que o teste ao `.249` falhe. A app testa a cada 60 s, 3 vezes, por isso troca uns 3 min depois da falha. Um Technitium que não responda (o do servidor, com ele em baixo) fica para quando voltar: carrega outra vez em Configurar.
+3. "Pronto para failover" verifica tudo isto: a app em cada Technitium que responda e o `*` com estes dados, sem nenhum A.
 4. Confirma nos dois servidores (o do `.66` tem a zona como secundária):
 
    ```bash
@@ -68,7 +68,7 @@ O agente só muda os nomes dos serviços que passa para o TNAS. O resto da zona 
 - **Serviços:** adicionam-se em Definições → Serviços, a partir das pastas do espelho ou à mão. A pasta, o endereço, o override e o IP só mudam com o serviço no servidor.
 - **Versão:** ao lado do nome, no topo; leva à release no GitHub.
 - **Ícones:** o nome de um ícone do [dashboardicons.com](https://dashboardicons.com), ou o link da sua página. Vazio: o do nome ou da pasta.
-- **Pronto para failover:** depois de cada verificação das imagens (no arranque, na descarga noturna e quando a stack de um serviço muda), o agente testa o token do Technitium, faz um snapshot de teste do espelho e vê as imagens e o que o TNAS precisa para cada compose (redes externas, portas livres). A caixa do TNAS diz "Pronto para failover" ou quantos problemas há; um problema novo vai por email.
+- **Pronto para failover:** depois de cada verificação das imagens (no arranque, na descarga noturna e quando a stack de um serviço muda), o agente testa o token do Technitium e a app Failover com o `*` da zona, faz um snapshot de teste do espelho e vê as imagens e o que o TNAS precisa para cada compose (redes externas, portas livres). A caixa do TNAS diz "Pronto para failover" ou quantos problemas há; um problema novo vai por email.
 - **Espelho:** de hora a hora o agente vê se o backup do TOS continua a escrever no espelho (`btrfs subvolume find-new`: ficheiros com dados novos) e se há pastas novas ou composes mudados. Espelho parado há mais de `mirror_stale_days` (2 por defeito), pasta nova ou compose mudado: email; a pasta nova aparece na página até a protegeres ou dispensares.
 - **Avisos por email:** o servidor em baixo (com a hora), failover e regresso (o assunto diz quantos serviços, quando e quanto tempo ficaram no TNAS), erro, NPM do servidor em falha, router, certificado inválido, descarga noturna falhada, em observação o que o agente faria, e o agente a reiniciar. Os de uma mesma verificação seguem num só email. Um envio falhado aparece logo nos eventos e tenta-se de novo durante um dia.
 - **Telemóvel:** no browser, "Adicionar ao ecrã inicial" instala a página. Para arrastar um serviço, segura-o meio segundo.

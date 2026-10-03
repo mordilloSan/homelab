@@ -335,9 +335,9 @@ type State struct {
 		OK       bool      `json:"ok"`
 		Up       bool      `json:"up,omitempty"` // compose up done: a restart before it starts it again
 		Msg      string    `json:"msg,omitempty"`
-		// R8: on because the whole server is down, until its NPM answers
-		ServerDown bool `json:"server_down,omitempty"`
-		Observed   bool `json:"observed,omitempty"` // in observation, told once per outage
+		// R8: on in place of the server's NPM, until that one answers
+		StandIn  bool `json:"stand_in,omitempty"`
+		Observed bool `json:"observed,omitempty"` // in observation, told once per outage
 	} `json:"tnas_npm"`
 	MaintUntil   time.Time            `json:"maint_until,omitzero"`
 	LastPull     string               `json:"last_pull,omitempty"`
@@ -784,56 +784,56 @@ func (a *Agent) evaluate(p probe) {
 		}
 		a.step(sv, a.svc(sv.Name), known, p.svcOK[sv.Name])
 	}
-	a.serverDownNPM()
+	a.standIn()
 	if st.TNASNPM.Snapshot != "" {
 		st.TNASNPM.OK = p.tnasNPMOK
 	}
 }
 
-// serverDownAfter is how long the whole server is down before the TNAS NPM
-// starts for it (R8): well inside the ~3 min the Technitium's Failover app
-// takes (3 health checks a minute apart) to send the zone's * to the TNAS.
-const serverDownAfter = time.Minute
+// standInAfter is how long the server's NPM fails before the TNAS NPM
+// stands in for it (R8): well inside the ~3 min the Technitium's Failover app
+// takes (3 failed tcp443 checks a minute apart) to send the zone's * to the TNAS.
+const standInAfter = time.Minute
 
-// npmStartFail starts the message of a TNAS NPM that R8 could not start.
-const npmStartFail = "NPM do TNAS por arrancar com o servidor em baixo: "
+// standInFail starts the message of a TNAS NPM that R8 could not start.
+const standInFail = "NPM do TNAS por arrancar no lugar do NPM do servidor: "
 
-// serverDownNPM applies R8: with the whole server down the TNAS NPM runs, so
-// the clients the Failover app sends to the TNAS find what does not live on
-// the server (the TNAS, the router...). It runs until the server's NPM
-// answers again; a ping is not enough.
-func (a *Agent) serverDownNPM() {
+// standIn applies R8: with the server's NPM down, the server alive or not,
+// the TNAS NPM runs, so the clients the Failover app sends to the TNAS find
+// what does not live on the server (the TNAS, the router...). The services
+// themselves still follow R2. It runs until the server's NPM answers again.
+func (a *Agent) standIn() {
 	st, n := &a.st, &a.st.TNASNPM
 	if st.ServerNPMOK {
-		n.ServerDown, n.Observed = false, false // stopIdleNPM stops it once no copy needs it
-		if strings.HasPrefix(n.Msg, npmStartFail) {
+		n.StandIn, n.Observed = false, false // stopIdleNPM stops it once no copy needs it
+		if strings.HasPrefix(n.Msg, standInFail) {
 			n.Msg = ""
 		}
 		return
 	}
-	if !n.ServerDown {
-		if st.ServerUp || st.ServerDown.IsZero() || a.now.Sub(st.ServerDown) < serverDownAfter || !st.MaintUntil.IsZero() {
+	if !n.StandIn {
+		if st.NPMFailSince.IsZero() || a.now.Sub(st.NPMFailSince) < standInAfter || !st.MaintUntil.IsZero() {
 			return
 		}
 		if a.cfg.Mode != "auto" {
 			if !n.Observed {
 				n.Observed = true
-				a.alert("", "[observação] o NPM do TNAS arrancaria agora: o servidor está em baixo")
+				a.alert("", "[observação] o NPM do TNAS arrancaria agora: o NPM do servidor não responde")
 			}
 			return
 		}
-		n.ServerDown = true
-		a.event("", "servidor em baixo: o NPM do TNAS liga-se para os nomes que o Technitium manda para o TNAS")
+		n.StandIn = true
+		a.event("", "o NPM do servidor não responde: o NPM do TNAS liga-se para os nomes que a app Failover do Technitium manda para o TNAS")
 		a.save()
 	}
 	if _, err := a.ensureNPM(); err != nil {
-		if !strings.HasPrefix(n.Msg, npmStartFail) {
-			a.alert("", npmStartFail+err.Error()+"; tento outra vez em cada verificação")
+		if !strings.HasPrefix(n.Msg, standInFail) {
+			a.alert("", standInFail+err.Error()+"; tento outra vez em cada verificação")
 		}
-		n.Msg = npmStartFail + err.Error()
+		n.Msg = standInFail + err.Error()
 		return
 	}
-	if strings.HasPrefix(n.Msg, npmStartFail) {
+	if strings.HasPrefix(n.Msg, standInFail) {
 		n.Msg = ""
 	}
 }
@@ -875,7 +875,7 @@ func (a *Agent) serverNPM(p probe) (known bool) {
 	}
 	if !st.NPMAlerted && a.now.Sub(st.NPMFailSince) >= minutes(a.cfg.NPM.AlertAfterMin) {
 		st.NPMAlerted = true
-		a.alert("", "NPM do servidor em falha com o servidor vivo: só aviso, sem failover")
+		a.alert("", "NPM do servidor em falha com o servidor vivo: os serviços ficam no servidor, sem failover")
 	}
 	return false
 }
@@ -1241,7 +1241,7 @@ func (a *Agent) ensureNPM() (started bool, err error) {
 
 func (a *Agent) stopIdleNPM() {
 	n := &a.st.TNASNPM
-	if n.Snapshot == "" || n.ServerDown {
+	if n.Snapshot == "" || n.StandIn {
 		return
 	}
 	for _, s := range a.st.Services {
