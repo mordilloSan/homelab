@@ -187,7 +187,9 @@ func TestAlertsMailed(t *testing.T) {
 	}
 }
 
-// A failed send is tried again on the next checks, 3 times, then given up (in the events).
+// A failed send is in the events at once, once per run of failures, and is
+// tried again on the next checks for a day, then given up (in the events);
+// the next send that works is an event too.
 func TestAlertsRetry(t *testing.T) {
 	a, f := setup(t)
 	f.failMail = errors.New("535 password errada")
@@ -211,7 +213,24 @@ func TestAlertsRetry(t *testing.T) {
 	if len(a.alerts) != 0 || !hasEvent(a, "desisto") {
 		t.Fatalf("passado um dia: %d na fila, eventos %v", len(a.alerts), a.events)
 	}
+	n := 0
+	for _, e := range a.events {
+		if strings.HasPrefix(e.Msg, "o email dos avisos falhou: 535 password errada") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d eventos da falha do email (queria 1): %v", n, a.events)
+	}
 	f.failMail = nil
+	a.mu.Lock()
+	a.alert("", "router acessível")
+	a.flushAlerts()
+	a.mu.Unlock()
+	a.mailJobs.Wait()
+	if !hasEvent(a, "email dos avisos enviado outra vez") {
+		t.Fatalf("sem o evento do email de volta: %v", a.events)
+	}
 }
 
 // Definições → Avisos: the password never leaves the agent; the test email.

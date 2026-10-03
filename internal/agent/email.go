@@ -194,9 +194,17 @@ func (a *Agent) flushAlerts() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if err == nil {
+			if a.mailDown {
+				a.mailDown = false
+				a.event("", "email dos avisos enviado outra vez")
+			}
 			return
 		}
 		slog.Warn("enviar o email dos avisos", "error", err)
+		if !a.mailDown { // the page shows it now, not after the day of retries
+			a.mailDown = true
+			a.event("", "o email dos avisos falhou: "+err.Error()+"; tento outra vez em cada verificação")
+		}
 		keep := slices.DeleteFunc(batch, func(x alertItem) bool { return a.now.Sub(x.T) > mailKeep })
 		if n := len(batch) - len(keep); n > 0 {
 			a.event("", fmt.Sprintf("o email dos avisos falha há mais de %s, desisto de %d: %v", mailKeep, n, err))

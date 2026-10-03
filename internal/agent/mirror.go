@@ -158,9 +158,12 @@ func (a *Agent) checkReady() {
 	a.mu.Unlock()
 
 	var p []string
-	tok, _ := os.ReadFile(c.DNS.TokenFile)
-	if err := testToken(a.sys, c.DNS.APIURL, c.DNS.Zone, strings.TrimSpace(string(tok))); err != nil {
+	b, _ := os.ReadFile(c.DNS.TokenFile)
+	tok := strings.TrimSpace(string(b))
+	if err := testToken(a.sys, c.DNS.APIURL, c.DNS.Zone, tok); err != nil {
 		p = append(p, "o token do Technitium não serve: "+err.Error())
+	} else {
+		p = append(p, failoverProblems(a.sys, c, tok)...)
 	}
 	if err := a.snapshotTest(c); err != nil {
 		p = append(p, err.Error())

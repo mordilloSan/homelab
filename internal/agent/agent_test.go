@@ -163,8 +163,18 @@ func (f *fake) Get(u, bearer string) ([]byte, error) {
 	if bearer != "" && bearer == f.badToken {
 		return []byte(`{"status":"invalid-token","errorMessage":"Invalid token or session expired."}`), nil
 	}
+	switch { // a Technitium with the Failover app and the zone's * as the agent writes it
+	case strings.HasSuffix(u, "/api/apps/list?"):
+		return []byte(`{"status":"ok","response":{"apps":[{"name":"Failover"}]}}`), nil
+	case strings.HasSuffix(u, "/api/zones/records/get?domain=%2A.engmariz.com&zone=engmariz.com"):
+		return []byte(goodWildcard), nil
+	}
 	return []byte(`{"status":"ok","ok":true}`), nil
 }
+
+// goodWildcard is the zone's * as Definições → DNS → Configurar writes it.
+const goodWildcard = `{"status":"ok","response":{"records":[{"type":"APP","ttl":60,"rData":{"appName":"Failover","classPath":"Failover.Address",
+	"data":"{\"primary\":[\"192.168.1.66\"],\"secondary\":[\"192.168.1.249\"],\"serverDown\":[\"192.168.1.249\"],\"healthCheck\":\"tcp443\",\"healthCheckUrl\":null,\"allowTxtStatus\":true}"}}]}}`
 
 // ran reports whether a command starting with prefix was run, and its position.
 func (f *fake) ran(prefix string) int {
@@ -387,7 +397,9 @@ func TestPartialFailoverAndReturn(t *testing.T) {
 	}
 }
 
-// T-15: server NPM down but the server pings: warn after 3 min, never fail over.
+// T-15: server NPM down but the server pings: warn after 3 min, never fail
+// over a service. The TNAS NPM stands in once (R8): the Failover app sends
+// the zone's * to the TNAS on 443 failing, the host up or not.
 func TestServerNPMDownServerAlive(t *testing.T) {
 	a, f := setup(t)
 	f.down["nginx.engmariz.com@"+srv] = true
@@ -401,8 +413,13 @@ func TestServerNPMDownServerAlive(t *testing.T) {
 	if !a.st.NPMAlerted || !mailed(f, "NPM do servidor em falha") {
 		t.Fatal("sem aviso do NPM")
 	}
-	if f.ran("") >= 0 {
-		t.Fatalf("agiu no caso 2.3: %v", f.cmds)
+	for _, c := range f.cmds {
+		if !strings.Contains(c, "failover-npm") {
+			t.Fatalf("agiu sobre um serviço no caso 2.3: %v", f.cmds)
+		}
+	}
+	if npmStarts(f) != 1 || !a.st.TNASNPM.StandIn {
+		t.Fatalf("o NPM do TNAS não ficou no lugar do do servidor: %d arranques, %+v", npmStarts(f), a.st.TNASNPM)
 	}
 	// the bars in the UI: the NPM failed, the services were not checked
 	if b := a.beats["vaultwarden"]; len(b) != maxBeats || b[len(b)-1].S != "unknown" || a.beats["npm"][maxBeats-1].S != "down" {
@@ -509,6 +526,111 @@ func TestTotalFailure(t *testing.T) {
 	}
 	if f.ran("arping -D -q -c 2 -w 3 -I ovs_eth0 192.168.1.92") < 0 {
 		t.Fatal("unifi sem teste de IP duplicado")
+	}
+}
+
+// npmStarts counts the TNAS NPM's compose up.
+func npmStarts(f *fake) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.cmds {
+		if strings.HasPrefix(c, "docker compose -p failover-npm -f") && strings.HasSuffix(c, " up -d") {
+			n++
+		}
+	}
+	return n
+}
+
+// R8: with the server off the TNAS NPM starts after 1 min, with no failover,
+// for the Technitium's Failover app to send the * there. It stays with no
+// copy, through a router failure and a server that only pings, and stops
+// once the server's NPM answers.
+func TestServerDownNPM(t *testing.T) {
+	a, f := setup(t)
+	a.cfg.Services = nil // nothing to fail over: only R8 starts it
+	f.noPing[srv] = true
+	f.down["nginx.engmariz.com@"+srv] = true
+	at := t0
+	tickTo(a, &at, 0)
+	if npmStarts(f) != 0 {
+		t.Fatal("o NPM do TNAS arrancou à primeira verificação falhada")
+	}
+	tickTo(a, &at, 1)
+	if npmStarts(f) != 1 || !a.st.TNASNPM.StandIn {
+		t.Fatalf("o NPM do TNAS não arrancou com o servidor em baixo há 1 min: %v", f.cmds)
+	}
+	f.noPing["192.168.1.1"] = true // without the router nothing is decided, nothing stopped
+	tickTo(a, &at, 5)
+	delete(f.noPing, "192.168.1.1")
+	delete(f.noPing, srv) // it pings, its NPM is still down: the TNAS NPM stays
+	tickTo(a, &at, 8)
+	if f.ran("docker compose -p failover-npm down") >= 0 {
+		t.Fatalf("o NPM do TNAS parou antes do NPM do servidor: %v", f.cmds)
+	}
+	delete(f.down, "nginx.engmariz.com@"+srv)
+	tickTo(a, &at, 9)
+	if f.ran("docker compose -p failover-npm down -v") < 0 || a.st.TNASNPM.Snapshot != "" || a.st.TNASNPM.StandIn {
+		t.Fatalf("o NPM do TNAS não parou com o servidor de volta: %+v %v", a.st.TNASNPM, f.cmds)
+	}
+	if npmStarts(f) != 1 {
+		t.Fatalf("o NPM do TNAS arrancou %d vezes", npmStarts(f))
+	}
+}
+
+// R8: a TNAS NPM that does not start is one email and a try at every check.
+func TestServerDownNPMFails(t *testing.T) {
+	a, f := setup(t)
+	a.cfg.Services = nil
+	f.noPing[srv] = true
+	f.down["nginx.engmariz.com@"+srv] = true
+	f.failCmd = []string{"docker compose -p failover-npm"}
+	at := t0
+	tickTo(a, &at, 4)
+	a.mailJobs.Wait()
+	f.mu.Lock()
+	n := 0
+	for _, m := range f.mails {
+		n += strings.Count(m.Body, "NPM do TNAS por arrancar")
+	}
+	f.failCmd = nil
+	f.mu.Unlock()
+	if n != 1 || npmStarts(f) != 4 || !strings.HasPrefix(a.st.TNASNPM.Msg, "NPM do TNAS por arrancar") {
+		t.Fatalf("%d avisos, %d tentativas, msg %q", n, npmStarts(f), a.st.TNASNPM.Msg)
+	}
+	tickTo(a, &at, 5)
+	if npmStarts(f) != 5 || !a.st.TNASNPM.Up || a.st.TNASNPM.Msg != "" {
+		t.Fatalf("não arrancou à tentativa seguinte: %+v", a.st.TNASNPM)
+	}
+}
+
+// R8: in observation it is one email; in a global maintenance, nothing.
+func TestServerDownNPMHeld(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		set  func(a *Agent)
+		mail int
+	}{
+		{"observação", func(a *Agent) { a.cfg.Mode = "observe" }, 1},
+		{"manutenção global", func(a *Agent) { a.st.MaintUntil = t0.Add(time.Hour) }, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a, f := setup(t)
+			a.cfg.Services = nil
+			c.set(a)
+			f.noPing[srv] = true
+			f.down["nginx.engmariz.com@"+srv] = true
+			at := t0
+			tickTo(a, &at, 10)
+			a.mailJobs.Wait()
+			n := 0
+			for _, m := range f.mails {
+				n += strings.Count(m.Body, "[observação] o NPM do TNAS arrancaria agora")
+			}
+			if npmStarts(f) != 0 || n != c.mail {
+				t.Fatalf("%d arranques, %d avisos de observação", npmStarts(f), n)
+			}
+		})
 	}
 }
 

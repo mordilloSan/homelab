@@ -167,8 +167,9 @@ export const serverChip = () => st.server_npm_ok ? npmDot('var(--success)', 'NPM
   : npmDot(st.npm_alerted ? 'var(--warning)' : 'var(--error)', st.npm_alerted ? 'NPM do servidor em falha, com o servidor vivo' : `NPM do servidor sem resposta ${ago(st.npm_fail_since)}`);
 export const tnasChip = () => {
   const n = st.tnas_npm;
-  return !n.snapshot ? npmDot('var(--neutral)', 'NPM do TNAS em espera: arranca com o primeiro failover')
-    : n.ok ? npmDot('var(--info)', 'NPM do TNAS a servir') : npmDot('var(--warning)', 'NPM do TNAS a arrancar', true);
+  return !n.snapshot && !n.stand_in ? npmDot('var(--neutral)', 'NPM do TNAS em espera: arranca com o primeiro failover ou com o NPM do servidor em falha')
+    : n.ok ? npmDot('var(--info)', n.stand_in ? 'NPM do TNAS a servir: o NPM do servidor não responde' : 'NPM do TNAS a servir')
+    : npmDot('var(--warning)', n.msg || 'NPM do TNAS a arrancar', true);
 };
 
 // Machine state for the node icons. The agent runs on the TNAS, so the page
