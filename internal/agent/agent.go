@@ -335,6 +335,9 @@ type State struct {
 		OK       bool      `json:"ok"`
 		Up       bool      `json:"up,omitempty"` // compose up done: a restart before it starts it again
 		Msg      string    `json:"msg,omitempty"`
+		// R8: on because the whole server is down, until its NPM answers
+		ServerDown bool `json:"server_down,omitempty"`
+		Observed   bool `json:"observed,omitempty"` // in observation, told once per outage
 	} `json:"tnas_npm"`
 	MaintUntil   time.Time            `json:"maint_until,omitzero"`
 	LastPull     string               `json:"last_pull,omitempty"`
@@ -385,6 +388,7 @@ type Agent struct {
 	iconPass   sync.Mutex                // one fetchIcons pass at a time
 	alerts     []alertItem               // for the email of this check (flushAlerts)
 	mailJobs   sync.WaitGroup            // emails being sent (tests wait for them)
+	mailDown   bool                      // the last alerts email failed: told once, and when one goes again
 	procRoute  string                    // the route table the discovery reads (tests set another)
 	ifaces     func() []ifaceAddr        // the interfaces the discovery reads (tests set others)
 	wake       chan struct{}
@@ -780,8 +784,57 @@ func (a *Agent) evaluate(p probe) {
 		}
 		a.step(sv, a.svc(sv.Name), known, p.svcOK[sv.Name])
 	}
+	a.serverDownNPM()
 	if st.TNASNPM.Snapshot != "" {
 		st.TNASNPM.OK = p.tnasNPMOK
+	}
+}
+
+// serverDownAfter is how long the whole server is down before the TNAS NPM
+// starts for it (R8): well inside the ~3 min the Technitium's Failover app
+// takes (3 health checks a minute apart) to send the zone's * to the TNAS.
+const serverDownAfter = time.Minute
+
+// npmStartFail starts the message of a TNAS NPM that R8 could not start.
+const npmStartFail = "NPM do TNAS por arrancar com o servidor em baixo: "
+
+// serverDownNPM applies R8: with the whole server down the TNAS NPM runs, so
+// the clients the Failover app sends to the TNAS find what does not live on
+// the server (the TNAS, the router...). It runs until the server's NPM
+// answers again; a ping is not enough.
+func (a *Agent) serverDownNPM() {
+	st, n := &a.st, &a.st.TNASNPM
+	if st.ServerNPMOK {
+		n.ServerDown, n.Observed = false, false // stopIdleNPM stops it once no copy needs it
+		if strings.HasPrefix(n.Msg, npmStartFail) {
+			n.Msg = ""
+		}
+		return
+	}
+	if !n.ServerDown {
+		if st.ServerUp || st.ServerDown.IsZero() || a.now.Sub(st.ServerDown) < serverDownAfter || !st.MaintUntil.IsZero() {
+			return
+		}
+		if a.cfg.Mode != "auto" {
+			if !n.Observed {
+				n.Observed = true
+				a.alert("", "[observação] o NPM do TNAS arrancaria agora: o servidor está em baixo")
+			}
+			return
+		}
+		n.ServerDown = true
+		a.event("", "servidor em baixo: o NPM do TNAS liga-se para os nomes que o Technitium manda para o TNAS")
+		a.save()
+	}
+	if _, err := a.ensureNPM(); err != nil {
+		if !strings.HasPrefix(n.Msg, npmStartFail) {
+			a.alert("", npmStartFail+err.Error()+"; tento outra vez em cada verificação")
+		}
+		n.Msg = npmStartFail + err.Error()
+		return
+	}
+	if strings.HasPrefix(n.Msg, npmStartFail) {
+		n.Msg = ""
 	}
 }
 
@@ -1188,7 +1241,7 @@ func (a *Agent) ensureNPM() (started bool, err error) {
 
 func (a *Agent) stopIdleNPM() {
 	n := &a.st.TNASNPM
-	if n.Snapshot == "" {
+	if n.Snapshot == "" || n.ServerDown {
 		return
 	}
 	for _, s := range a.st.Services {
