@@ -490,3 +490,13 @@ func TestPageGzipAndETag(t *testing.T) {
 		t.Fatalf("status sem gzip: %v", w.Header())
 	}
 }
+
+// The login page shows the agent's version, and nothing of the network.
+func TestLoginVersion(t *testing.T) {
+	a, _ := setup(t)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if b := w.Body.String(); !strings.Contains(b, "failover-agent "+Version) || strings.Contains(b, a.cfg.TNASIP) {
+		t.Fatalf("página de login: %s", b[len(b)-400:])
+	}
+}
