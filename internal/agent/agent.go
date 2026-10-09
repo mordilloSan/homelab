@@ -312,7 +312,7 @@ type Event struct {
 type State struct {
 	RouterOK       bool              `json:"router_ok"`
 	TNASNetOK      bool              `json:"tnas_net_ok"`   // its Technitium reaches the internet
-	ServerNetOK    bool              `json:"server_net_ok"` // same for the server's; kept as it was while the server is down
+	ServerNetOK    bool              `json:"server_net_ok"` // same for the server's; both kept as they were while their Technitium is down
 	TNASDNSOK      bool              `json:"tnas_dns_ok"`   // its Technitium answers, internet or not: a member of the cluster
 	ServerDNSOK    bool              `json:"server_dns_ok"` // same for the server's
 	TNASUp         bool              `json:"tnas_up"`       // its LAN IP answers; with RouterOK, it is on the LAN
@@ -770,10 +770,15 @@ func (a *Agent) evaluate(p probe) {
 			a.event("", map[bool]string{true: "Technitium do " + who + " responde outra vez", false: "Technitium do " + who + " não responde: o cluster DNS só tem o outro"}[ok])
 		}
 	}
-	netSeen(&st.TNASNetOK, p.tnasNet, "TNAS")
+	// a Technitium that does not answer says nothing about its box's internet: the DNS cluster shows it
+	if p.tnasDNS {
+		netSeen(&st.TNASNetOK, p.tnasNet, "TNAS")
+	}
 	dnsSeen(&st.TNASDNSOK, p.tnasDNS, "TNAS")
 	if p.npmOK || p.serverPing { // a server that is down says nothing about its internet
-		netSeen(&st.ServerNetOK, p.serverNet, "servidor")
+		if p.serverDNS {
+			netSeen(&st.ServerNetOK, p.serverNet, "servidor")
+		}
 		dnsSeen(&st.ServerDNSOK, p.serverDNS, "servidor")
 	}
 
@@ -1562,7 +1567,12 @@ func (a *Agent) nightly() {
 		defer a.pulling.Store(false)
 		var failed []string
 		for _, j := range jobs {
-			if err := a.sys.Run("docker", j...); err != nil {
+			err := a.sys.Run("docker", j...)
+			if err != nil { // a registry's rate limit (ghcr.io's "retry-after") passes in a minute
+				a.sleep(time.Minute)
+				err = a.sys.Run("docker", j...)
+			}
+			if err != nil {
 				failed = append(failed, j[2]+": "+err.Error())
 			}
 		}

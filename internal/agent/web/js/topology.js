@@ -220,10 +220,11 @@ export function renderTopology() {
       <div class="lane-pills">${at.moving.map(pill).join('')}</div></div>`);
   paint('clients', `<span class="node-icon">${icon('devices')}</span><span><strong>Clientes</strong>
     <small>LAN e WireGuard${st.dns_zone ? `, *.${esc(st.dns_zone)}` : ''}</small></span>`);
-  const nets = netState(), off = [nets.server === 'down' && 'servidor', nets.tnas === 'down' && 'TNAS'].filter(Boolean);
-  const all = Object.values(nets);
-  const ns = all.every(x => x === 'up') ? 'up' : all.includes('up') ? 'warn' : all.includes('down') ? 'down' : 'unknown';
-  const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : all.includes('unknown') ? 'por verificar' : 'servidor e TNAS com acesso';
+  // one internet: a box whose Technitium cannot be asked does not count against it
+  const nets = netState(), boxes = s => [nets.server === s && 'servidor', nets.tnas === s && 'TNAS'].filter(Boolean);
+  const off = boxes('down'), on = boxes('up');
+  const ns = off.length ? (on.length ? 'warn' : 'down') : on.length ? 'up' : 'unknown';
+  const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : on.length ? `${on.join(' e ')} com acesso` : 'por verificar';
   paint('internet', `<span class="node-icon st st-${ns}">${icon('web')}</span><span><strong>Internet</strong><small>${ntext}</small></span>`);
   $('internet').title = `A cada ${st.check_interval_s} s, cada caixa pede ao seu Technitium um nome que nenhuma cache tem: a resposta tem de vir da internet`;
   // the Technitium runs on both, in a cluster: a dot for each, asked for its own zone
@@ -256,10 +257,10 @@ export function renderTopology() {
 }
 
 // Each box's internet, as its Technitium last answered; unknown while the box
-// cannot be checked.
+// or its Technitium cannot be checked.
 export const netState = () => ({
-  server: !st.router_ok || !st.server_up ? 'unknown' : st.server_net_ok ? 'up' : 'down',
-  tnas: !st.router_ok ? 'unknown' : st.tnas_net_ok ? 'up' : 'down',
+  server: !st.router_ok || !st.server_up || !st.server_dns_ok ? 'unknown' : st.server_net_ok ? 'up' : 'down',
+  tnas: !st.router_ok || !st.tnas_dns_ok ? 'unknown' : st.tnas_net_ok ? 'up' : 'down',
 });
 
 // The two members of the DNS cluster; the server's is unknown while the server is down.

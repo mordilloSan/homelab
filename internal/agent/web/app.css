@@ -204,10 +204,10 @@ select { font: inherit; color: inherit; padding: 5px 8px; border-radius: 8px; bo
 .banner .icon { color: var(--c); margin-top: 1px; }
 
 /* the topology: where every service is running right now */
-/* left to right, as a request goes: the clients, then the DNS (the internet over
+/* left to right, as a request goes: the clients, level with the DNS (the internet over
    it, the router under it), then the server over the TNAS, the agent's checks between them */
 .topo { position: relative; display: grid; grid-template-columns: auto minmax(170px, auto) minmax(0, 1fr);
-  grid-template-areas: "clients internet server" "clients dns lane" "clients router tnas"; column-gap: 56px; align-items: center;
+  grid-template-areas: ". internet server" "clients dns lane" ". router tnas"; column-gap: 56px; align-items: center;
   padding-block: 40px; }
 #nodeServer { grid-area: server; } #nodeTnas { grid-area: tnas; } #lane { grid-area: lane; }
 #dns { grid-area: dns; } #internet { grid-area: internet; } #routerNode { grid-area: router; }
