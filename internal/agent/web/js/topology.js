@@ -222,8 +222,7 @@ export function renderTopology() {
     <small>LAN e WireGuard${st.dns_zone ? `, *.${esc(st.dns_zone)}` : ''}</small></span>`);
   // one internet: a box whose Technitium cannot be asked does not count against it
   const nets = netState(), boxes = s => [nets.server === s && 'servidor', nets.tnas === s && 'TNAS'].filter(Boolean);
-  const off = boxes('down'), on = boxes('up');
-  const ns = off.length ? (on.length ? 'warn' : 'down') : on.length ? 'up' : 'unknown';
+  const off = boxes('down'), on = boxes('up'), ns = st.internet.status;
   const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : on.length ? `${on.join(' e ')} com acesso` : 'por verificar';
   paint('internet', `<span class="node-icon st st-${ns}">${icon('web')}</span><span><strong>Internet</strong><small>${ntext}</small></span>`);
   $('internet').title = `A cada ${st.check_interval_s} s, cada caixa pede ao seu Technitium um nome que nenhuma cache tem: a resposta tem de vir da internet`;
@@ -256,18 +255,10 @@ export function renderTopology() {
   probePulse();
 }
 
-// Each box's internet, as its Technitium last answered; unknown while the box
-// or its Technitium cannot be checked.
-export const netState = () => ({
-  server: !st.router_ok || !st.server_up || !st.server_dns_ok ? 'unknown' : st.server_net_ok ? 'up' : 'down',
-  tnas: !st.router_ok || !st.tnas_dns_ok ? 'unknown' : st.tnas_net_ok ? 'up' : 'down',
-});
-
-// The two members of the DNS cluster; the server's is unknown while the server is down.
-export const dnsMembers = () => [
-  {who: 'servidor', ip: st.server_ip, s: !st.router_ok || !st.server_up ? 'unknown' : st.server_dns_ok ? 'up' : 'down'},
-  {who: 'TNAS', ip: st.tnas_ip, s: st.tnas_dns_ok ? 'up' : 'down'},
-];
+// Each box's internet and the two members of the DNS cluster, as the agent
+// judged them (netDNS, also in GET /api/).
+export const netState = () => ({server: st.internet.server, tnas: st.internet.tnas});
+export const dnsMembers = () => st.dns.members.map(m => ({who: m.who, ip: m.ip, s: m.status}));
 
 // Telemetry in the top corners of the topology; the mirror's age moves on every second.
 export function renderHud() {

@@ -73,6 +73,31 @@ O agente só muda os nomes dos serviços que passa para o TNAS. O resto da zona 
 - **Avisos por email:** o servidor em baixo (com a hora), failover e regresso (o assunto diz quantos serviços, quando e quanto tempo ficaram no TNAS), erro, NPM do servidor em falha, router, certificado inválido, descarga noturna falhada, em observação o que o agente faria, e o agente a reiniciar. Os de uma mesma verificação seguem num só email. Um envio falhado aparece logo nos eventos e tenta-se de novo durante um dia.
 - **Telemóvel:** no browser, "Adicionar ao ecrã inicial" instala a página. Para arrastar um serviço, segura-o meio segundo.
 - **Eventos:** 30 dias, com filtro, procura e exportação para CSV.
+- **Homepage (ou outro painel):** `GET /api/` dá o resumo em JSON: modo, pronto para failover, servidor, TNAS, router, internet, cluster DNS, serviços (quantos no TNAS e a lista), imagens, espelho, certificado e o último evento. Pede o token gerado em Definições → Conta (mostrado uma vez; gerar outro invalida o anterior). Com o widget `customapi` do Homepage:
+
+  ```yaml
+  - Failover:
+      href: https://192.168.1.249:8099
+      widget:
+        type: customapi
+        url: https://192.168.1.249:8099/api/
+        headers:
+          Authorization: Bearer {{HOMEPAGE_VAR_FAILOVER_TOKEN}}
+        mappings:
+          - field: services.failover
+            label: Em failover
+          - field: ready.ok
+            label: Pronto
+            remap: [{value: true, to: sim}, {value: false, to: não}]
+          - field: internet.ok
+            label: Internet
+            remap: [{value: true, to: OK}, {value: false, to: sem acesso}]
+          - field: dns.up
+            label: DNS
+            suffix: /2
+  ```
+
+  O certificado do agente é autoassinado: o contentor do Homepage precisa de `NODE_TLS_REJECT_UNAUTHORIZED=0`, ou de confiar nele.
 
 ## Quando algo corre mal
 

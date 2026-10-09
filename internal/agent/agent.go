@@ -393,6 +393,7 @@ type Agent struct {
 	ifaces     func() []ifaceAddr        // the interfaces the discovery reads (tests set others)
 	wake       chan struct{}
 	view       atomic.Pointer[view]
+	api        atomic.Pointer[view] // GET /api/
 	pulling    atomic.Bool
 	scanning   atomic.Bool
 	rescan     atomic.Bool // asked for while a scan ran
@@ -727,6 +728,15 @@ func (a *Agent) record(p probe) {
 	}
 }
 
+// netSeen notes a box's internet, as its Technitium answered. One that did
+// not answer (asked false) says nothing about it: the DNS cluster shows that.
+func (a *Agent) netSeen(was *bool, asked, ok bool, who string) {
+	if asked && ok != *was {
+		*was = ok
+		a.event("", map[bool]string{true: who + ": internet acessível", false: who + ": sem internet, o DNS não resolve nomes de fora"}[ok])
+	}
+}
+
 func (a *Agent) evaluate(p probe) {
 	c, st := &a.cfg, &a.st
 	a.record(p)
@@ -758,27 +768,16 @@ func (a *Agent) evaluate(p probe) {
 	if !st.RouterOK {
 		return
 	}
-	netSeen := func(was *bool, ok bool, who string) {
-		if ok != *was {
-			*was = ok
-			a.event("", map[bool]string{true: who + ": internet acessível", false: who + ": sem internet, o DNS não resolve nomes de fora"}[ok])
-		}
-	}
 	dnsSeen := func(was *bool, ok bool, who string) {
 		if ok != *was {
 			*was = ok
 			a.event("", map[bool]string{true: "Technitium do " + who + " responde outra vez", false: "Technitium do " + who + " não responde: o cluster DNS só tem o outro"}[ok])
 		}
 	}
-	// a Technitium that does not answer says nothing about its box's internet: the DNS cluster shows it
-	if p.tnasDNS {
-		netSeen(&st.TNASNetOK, p.tnasNet, "TNAS")
-	}
+	a.netSeen(&st.TNASNetOK, p.tnasDNS, p.tnasNet, "TNAS")
 	dnsSeen(&st.TNASDNSOK, p.tnasDNS, "TNAS")
 	if p.npmOK || p.serverPing { // a server that is down says nothing about its internet
-		if p.serverDNS {
-			netSeen(&st.ServerNetOK, p.serverNet, "servidor")
-		}
+		a.netSeen(&st.ServerNetOK, p.serverDNS, p.serverNet, "servidor")
 		dnsSeen(&st.ServerDNSOK, p.serverDNS, "servidor")
 	}
 
@@ -1634,6 +1633,9 @@ func (a *Agent) publish() {
 	ui, _ := UIURL(cmp.Or(a.listening, a.cfg.UI.Listen), a.cfg.TNASIP, true)
 	a.watchCfg.Store(&watchCfg{a.cfg.Email, time.Duration(a.cfg.CheckIntervalS) * time.Second, ui})
 	names, notAfter := a.CertInfo()
+	net, dns := a.netDNS()
+	api := a.apiSummary(net, dns, notAfter)
+	a.api.Store(&view{api, gzipBytes(api)})
 	a.evMu.Lock()
 	recent := slices.Clone(a.events[max(0, len(a.events)-statusEvents):])
 	a.evMu.Unlock()
@@ -1648,16 +1650,15 @@ func (a *Agent) publish() {
 		StartTimeoutMin  int       `json:"start_timeout_min"`
 		DefaultExpiryMin int       `json:"default_expiry_min"`
 		DNSToken         bool      `json:"dns_token"`
+		APIToken         bool      `json:"api_token"`
 		DNSAPIURL        string    `json:"dns_api_url"`
 		ServerIP         string    `json:"server_ip"`
 		TNASIP           string    `json:"tnas_ip"`
 		RouterIP         string    `json:"router_ip"`
 		RouterOK         bool      `json:"router_ok"`
 		RouterMs         int       `json:"router_ms"`
-		TNASNetOK        bool      `json:"tnas_net_ok"`
-		ServerNetOK      bool      `json:"server_net_ok"`
-		TNASDNSOK        bool      `json:"tnas_dns_ok"`
-		ServerDNSOK      bool      `json:"server_dns_ok"`
+		Internet         netView   `json:"internet"`
+		DNS              dnsView   `json:"dns"`
 		TNASUp           bool      `json:"tnas_up"`
 		ServerUp         bool      `json:"server_up"`
 		ServerNPMOK      bool      `json:"server_npm_ok"`
@@ -1684,8 +1685,8 @@ func (a *Agent) publish() {
 		MirrorNew        []string  `json:"mirror_new"`
 		Verdict          Verdict   `json:"verdict"`
 	}{
-		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.cfg.DNS.APIURL,
-		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.routerMs, a.st.TNASNetOK, a.st.ServerNetOK, a.st.TNASDNSOK, a.st.ServerDNSOK, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
+		a.now, Version, userOf(a.creds.Load()), a.cfg.Mode, a.cfg.CheckIntervalS, a.cfg.StartTimeoutMin, a.cfg.Maintenance.DefaultExpiryMin, a.cfg.hasToken(), a.creds.Load() != nil && a.creds.Load().APITokenHash != "", a.cfg.DNS.APIURL,
+		a.cfg.Server.IP, a.cfg.TNASIP, a.cfg.RouterIP, a.st.RouterOK, a.routerMs, net, dns, a.st.TNASUp, a.st.ServerUp, a.st.ServerNPMOK, a.st.NPMFailSince, a.st.NPMAlerted,
 		a.st.TNASNPM, a.st.MaintUntil, a.st.LastPull, a.cfg.Nightly.PrepullAt, a.cfg.Server.NPMCheckHost,
 		a.st.Images, a.st.ImagesAt, a.scanning.Load(), a.cfg.DNS.Zone, a.beats, svcs, recent,
 		settingsView(&a.cfg), a.st.SetupPending, a.listening, certView{names, notAfter},
