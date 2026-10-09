@@ -220,10 +220,10 @@ export function renderTopology() {
       <div class="lane-pills">${at.moving.map(pill).join('')}</div></div>`);
   paint('clients', `<span class="node-icon">${icon('devices')}</span><span><strong>Clientes</strong>
     <small>LAN e WireGuard${st.dns_zone ? `, *.${esc(st.dns_zone)}` : ''}</small></span>`);
-  const nets = netState(), off = [nets.server === 'down' && 'servidor', nets.tnas === 'down' && 'TNAS'].filter(Boolean);
-  const all = Object.values(nets);
-  const ns = all.every(x => x === 'up') ? 'up' : all.includes('up') ? 'warn' : all.includes('down') ? 'down' : 'unknown';
-  const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : all.includes('unknown') ? 'por verificar' : 'servidor e TNAS com acesso';
+  // one internet: a box whose Technitium cannot be asked does not count against it
+  const nets = netState(), boxes = s => [nets.server === s && 'servidor', nets.tnas === s && 'TNAS'].filter(Boolean);
+  const off = boxes('down'), on = boxes('up'), ns = st.internet.status;
+  const ntext = off.length ? `sem acesso: ${off.join(' e ')}` : on.length ? `${on.join(' e ')} com acesso` : 'por verificar';
   paint('internet', `<span class="node-icon st st-${ns}">${icon('web')}</span><span><strong>Internet</strong><small>${ntext}</small></span>`);
   $('internet').title = `A cada ${st.check_interval_s} s, cada caixa pede ao seu Technitium um nome que nenhuma cache tem: a resposta tem de vir da internet`;
   // the Technitium runs on both, in a cluster: a dot for each, asked for its own zone
@@ -255,18 +255,10 @@ export function renderTopology() {
   probePulse();
 }
 
-// Each box's internet, as its Technitium last answered; unknown while the box
-// cannot be checked.
-export const netState = () => ({
-  server: !st.router_ok || !st.server_up ? 'unknown' : st.server_net_ok ? 'up' : 'down',
-  tnas: !st.router_ok ? 'unknown' : st.tnas_net_ok ? 'up' : 'down',
-});
-
-// The two members of the DNS cluster; the server's is unknown while the server is down.
-export const dnsMembers = () => [
-  {who: 'servidor', ip: st.server_ip, s: !st.router_ok || !st.server_up ? 'unknown' : st.server_dns_ok ? 'up' : 'down'},
-  {who: 'TNAS', ip: st.tnas_ip, s: st.tnas_dns_ok ? 'up' : 'down'},
-];
+// Each box's internet and the two members of the DNS cluster, as the agent
+// judged them (netDNS, also in GET /api/).
+export const netState = () => ({server: st.internet.server, tnas: st.internet.tnas});
+export const dnsMembers = () => st.dns.members.map(m => ({who: m.who, ip: m.ip, s: m.status}));
 
 // Telemetry in the top corners of the topology; the mirror's age moves on every second.
 export function renderHud() {

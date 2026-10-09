@@ -866,19 +866,26 @@ func TestScanImages(t *testing.T) {
 	}
 }
 
-// Each box's internet is its own Technitium; the server's is left as it was
-// while the server is down.
+// Each box's internet is its own Technitium; it is left as it was while that
+// Technitium does not answer, and the server's while the server is down.
 func TestInternetPerBox(t *testing.T) {
 	a, f := setup(t)
-	f.noNet = map[string]bool{a.cfg.Server.IP: true}
+	f.noNet = map[string]bool{a.cfg.TNASIP: true}
+	f.noDNS = map[string]bool{a.cfg.TNASIP: true}
 	a.Tick(t0)
+	if !a.st.TNASNetOK || hasEvent(a, "TNAS: sem internet") {
+		t.Fatalf("o Technitium do TNAS parado tirou-lhe a internet: %v", a.events)
+	}
+	f.noDNS = map[string]bool{}
+	f.noNet = map[string]bool{a.cfg.Server.IP: true}
+	a.Tick(t0.Add(time.Minute))
 	if a.st.ServerNetOK || !a.st.TNASNetOK || !hasEvent(a, "servidor: sem internet, o DNS não resolve nomes de fora") {
 		t.Fatalf("servidor sem internet: %v %v %v", a.st.ServerNetOK, a.st.TNASNetOK, a.events)
 	}
 	f.noNet = map[string]bool{}
 	f.noPing[a.cfg.Server.IP] = true
 	f.down[a.cfg.Server.NPMCheckHost+"@"+a.cfg.Server.IP] = true
-	a.Tick(t0.Add(time.Minute))
+	a.Tick(t0.Add(2 * time.Minute))
 	if a.st.ServerNetOK {
 		t.Fatal("com o servidor em baixo, a internet dele mudou")
 	}

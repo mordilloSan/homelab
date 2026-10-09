@@ -136,6 +136,7 @@ func (a *Agent) Handler() http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 	})
 	mux.HandleFunc("POST /api/logout", a.postLogout)
+	mux.HandleFunc("POST /api/token", a.postToken)
 	mux.HandleFunc("POST /api/mirror/seen", func(w http.ResponseWriter, _ *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -163,6 +164,7 @@ func (a *Agent) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
 		_, _ = w.Write(appIcon)
 	})
+	root.HandleFunc("GET /api/{$}", a.getAPI) // a session or the API token
 	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -430,6 +432,7 @@ func (a *Agent) postPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := newCreds(c.User, req.New)
 	if err == nil {
+		n.APITokenHash = c.APITokenHash
 		err = saveUser(a.userPath, n)
 	}
 	if err != nil {

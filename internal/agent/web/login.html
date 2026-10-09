@@ -8,100 +8,186 @@
 <meta name="theme-color" content="#1b2635">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232052c2'/%3E%3Cpath fill='%23fff' transform='translate(2.4 2.4) scale(.8)' d='m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z'/%3E%3C/svg%3E">
 <style>
-/* same tokens as index.html (LinuxIO): dark by default, light when asked */
+/* same tokens as index.html (LinuxIO): dark by default, light when asked. One glass card on
+   a dot-grid floor; it opens on a servidor ⇄ TNAS that is only decoration: no IP, no state before the login */
 @font-face { font-family: "Inter Variable"; src: url(inter.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
 :root {
   color-scheme: dark;
-  --bg: #1b2635; --paper: #233044; --well: rgba(0, 0, 0, .18);
-  --card: rgba(17, 25, 42, .6);
-  --card-gradient: linear-gradient(180deg, rgba(255,255,255,.18) 0%, rgba(255,255,255,.11) 38%, rgba(255,255,255,.08) 100%);
-  --shadow: 0 16px 40px -28px rgba(0, 0, 0, .6);
-  --text: rgba(255, 255, 255, .95); --muted: rgba(255, 255, 255, .56); --divider: rgba(255, 255, 255, .14);
-  --primary: #407ad6; --primary-dark: #2f65cb; --error: #f54b3f;
+  --font: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --bg: #1b2635; --bg-deep: #141d2a; --dot: rgba(255, 255, 255, .07);
+  --card: rgba(17, 25, 42, .62);
+  --card-gradient: linear-gradient(180deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,.10) 38%, rgba(255,255,255,.07) 100%);
+  --well: rgba(0, 0, 0, .2); --well-hi: rgba(0, 0, 0, .28);
+  --shadow: 0 30px 60px -30px rgba(0, 0, 0, .75), 0 0 0 1px rgba(255, 255, 255, .06);
+  --text: rgba(255, 255, 255, .95); --muted: rgba(255, 255, 255, .56); --divider: rgba(255, 255, 255, .12);
+  --primary: #407ad6; --primary-hi: #6395e0; --primary-dark: #2f65cb; --glow: rgba(64, 122, 214, .35); --error: #f54b3f;
 }
 @media (prefers-color-scheme: light) {
-  :root { color-scheme: light; --bg: #f7f9fc; --paper: #fff; --well: rgba(0, 0, 0, .035); --card: rgba(255, 255, 255, .82);
-    --card-gradient: linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.98)); --shadow: 0 12px 32px -24px rgba(0, 0, 0, .45);
-    --text: rgba(15, 15, 15, .95); --muted: rgba(15, 15, 15, .62); --divider: rgba(0, 0, 0, .14);
-    --primary: #376fd0; --primary-dark: #2052c2; --error: #cf222e; }
+  :root { color-scheme: light; --bg: #f2f5fa; --bg-deep: #e6ecf5; --dot: rgba(15, 30, 60, .08);
+    --card: rgba(255, 255, 255, .86); --card-gradient: linear-gradient(180deg, rgba(255,255,255,.7), rgba(255,255,255,.98));
+    --well: rgba(0, 0, 0, .035); --well-hi: rgba(0, 0, 0, .055);
+    --shadow: 0 24px 50px -28px rgba(20, 40, 80, .45), 0 0 0 1px rgba(0, 0, 0, .06);
+    --text: rgba(15, 15, 15, .95); --muted: rgba(15, 15, 15, .6); --divider: rgba(0, 0, 0, .12);
+    --primary: #376fd0; --primary-hi: #5a8ee0; --primary-dark: #2052c2; --glow: rgba(55, 111, 208, .22); --error: #cf222e; }
 }
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text);
-  font: 400 13px/1.5 "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
-form { width: min(380px, 100%); padding: 28px; border-radius: 16px; background-color: var(--card); background-image: var(--card-gradient);
-  box-shadow: var(--shadow); display: grid; gap: 6px; animation: rise .35s cubic-bezier(.2, .8, .2, 1); }
-@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
-.logo { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 26%; color: #fff; margin-bottom: 12px;
-  background: linear-gradient(160deg, #6395e0, var(--primary-dark));
-  box-shadow: inset 0 1px 1px rgba(255,255,255,.4), inset 0 -2px 4px rgba(0,0,0,.15), 0 6px 14px -6px rgba(32,82,194,.8); }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; color: var(--text);
+  font: 400 13px/1.5 var(--font); -webkit-font-smoothing: antialiased; background-color: var(--bg);
+  background-image: radial-gradient(60% 50% at 50% 38%, var(--glow), transparent 70%),
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.5px), linear-gradient(180deg, var(--bg), var(--bg-deep));
+  background-size: auto, 22px 22px, auto; }
+.shell { width: min(400px, 100%); display: grid; gap: 14px; }
+form { padding: 26px 28px 22px; border-radius: 20px; background-color: var(--card); background-image: var(--card-gradient);
+  box-shadow: var(--shadow); backdrop-filter: blur(14px); display: grid; gap: 6px; animation: rise .45s cubic-bezier(.2, .8, .2, 1); }
+@keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+.head { display: flex; align-items: center; gap: 14px; }
+.logo { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 28%; color: #fff; flex: none;
+  background: linear-gradient(160deg, var(--primary-hi), var(--primary-dark));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.45), inset 0 -2px 4px rgba(0,0,0,.18), 0 8px 18px -6px var(--glow); }
 .logo svg { width: 26px; height: 26px; fill: currentColor; }
-h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
-.sub { margin: 0 0 14px; color: var(--muted); }
-label { margin-top: 8px; color: var(--muted); font-size: 12px; }
-input { width: 100%; padding: 9px 11px; border-radius: 4px; border: 1px solid var(--divider); background: var(--well); color: inherit; font: inherit; font-size: 14px; }
-input:hover { border-color: color-mix(in srgb, var(--text), transparent 60%); }
-input:focus-visible, button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-.err { margin: 8px 0 0; color: var(--error); }
-label small { color: var(--muted); font-weight: 400; }
-code { font-size: 12px; }
-button { margin-top: 16px; padding: 9px 16px; border: 0; border-radius: 4px; background: var(--primary); color: #fff; font: inherit;
-  font-size: 14px; font-weight: 500; cursor: pointer; text-shadow: 0 1px 1px rgba(0,0,0,.3); }
-button:hover { background: var(--primary-dark); }
-@media (prefers-reduced-motion: reduce) { form { animation: none; } }
+h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.015em; text-wrap: balance; }
+.sub { margin: 2px 0 0; color: var(--muted); }
+/* a packet goes to the TNAS and comes back; a transform, so the GPU moves it */
+.topo { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin: 18px 0 10px;
+  padding: 12px 14px; border-radius: 14px; background: var(--well); border: 1px solid var(--divider); }
+.node { display: flex; align-items: center; gap: 8px; }
+.node i { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--well-hi); color: var(--muted); }
+.node svg { width: 16px; height: 16px; fill: currentColor; }
+.node b { font-size: 12.5px; font-weight: 600; }
+.wire { position: relative; height: 2px; background: repeating-linear-gradient(90deg, var(--divider) 0 5px, transparent 5px 9px); }
+.wire i { position: absolute; top: 50%; left: 0; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: var(--primary-hi); box-shadow: 0 0 10px 2px var(--glow); animation: travel 3.2s cubic-bezier(.6, 0, .4, 1) infinite alternate; will-change: transform; }
+@keyframes travel { to { transform: translateX(var(--w, 120px)); } }
+label { margin-top: 8px; color: var(--muted); font-size: 12px; font-weight: 500; }
+label small { font-weight: 400; }
+.field { position: relative; display: flex; align-items: center; }
+.field > svg { position: absolute; left: 11px; width: 16px; height: 16px; fill: var(--muted); pointer-events: none; transition: fill .15s; }
+.field:focus-within > svg { fill: var(--primary-hi); }
+input { width: 100%; padding: 10px 12px 10px 36px; border-radius: 10px; border: 1px solid var(--divider); background: var(--well);
+  color: inherit; font: inherit; font-size: 14px; transition: border-color .15s, box-shadow .15s, background .15s; }
+input:hover { border-color: color-mix(in srgb, var(--text), transparent 65%); }
+input:focus { outline: none; border-color: var(--primary); background: var(--well-hi); box-shadow: 0 0 0 3px var(--glow); }
+.peek { position: absolute; right: 4px; display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px;
+  background: none; color: var(--muted); cursor: pointer; }
+.peek:hover { color: var(--text); background: var(--well-hi); }
+.peek svg { width: 18px; height: 18px; fill: currentColor; }
+.field:has(.peek) input { padding-right: 40px; }
+.err { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 9px 11px; border-radius: 10px; color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent); }
+.err svg { width: 16px; height: 16px; fill: currentColor; flex: none; margin-top: 1px; }
+.shake { animation: shake .4s cubic-bezier(.36, .07, .19, .97); }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.go { margin-top: 18px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 16px; border: 0; border-radius: 10px;
+  background: linear-gradient(180deg, var(--primary-hi), var(--primary-dark)); color: #fff; font: inherit; font-size: 14px; font-weight: 600;
+  cursor: pointer; text-shadow: 0 1px 1px rgba(0,0,0,.25); box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 8px 18px -8px var(--glow); transition: filter .15s, transform .15s; }
+.go:hover { filter: brightness(1.08); }
+.go:active { transform: translateY(1px); }
+.go svg { width: 18px; height: 18px; fill: currentColor; transition: transform .2s; }
+.go:hover svg { transform: translateX(3px); }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.foot { margin: 0; text-align: center; color: var(--muted); font: 500 11px var(--mono); }
+code { font: 500 11.5px var(--mono); padding: 1px 5px; border-radius: 5px; background: var(--well-hi); }
+.note { margin: 16px 0 0; color: var(--muted); }
+@media (max-width: 420px) { form { padding: 22px 18px 18px; } .topo { padding: 10px; gap: 8px; } }
+@media (prefers-reduced-motion: reduce) { form, .wire i, .shake { animation: none; } }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><path d="M4 3h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m0 10h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1m5-6h1V5H9zm0 10h1v-2H9zM5 5v2h2V5zm0 10v2h2v-2z"/></symbol>
+  <symbol id="i-nas" viewBox="0 0 24 24"><path d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2m0 2v4h12V4zm0 6v4h12v-4zm0 6v4h12v-4zm2-10h2v1H8zm0 6h2v1H8zm0 6h2v1H8z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M12 4a4 4 0 0 1 4 4a4 4 0 0 1-4 4a4 4 0 0 1-4-4a4 4 0 0 1 4-4m0 10c4.42 0 8 1.79 8 4v2H4v-2c0-2.21 3.58-4 8-4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2a2 2 0 0 0-2-2a2 2 0 0 0-2 2a2 2 0 0 0 2 2m6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 5-5a5 5 0 0 1 5 5v2zm-6-5a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M12 9a3 3 0 0 1 3 3a3 3 0 0 1-3 3a3 3 0 0 1-3-3a3 3 0 0 1 3-3m0-4.5c5 0 9.27 3.11 11 7.5c-1.73 4.39-6 7.5-11 7.5S2.73 16.39 1 12c1.73-4.39 6-7.5 11-7.5M3.18 12a9.821 9.821 0 0 0 17.64 0a9.821 9.821 0 0 0-17.64 0"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5l1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5L16 11z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M13 13h-2V7h2m0 10h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2"/></symbol>
+</svg>
+<template id="topo"><div class="topo" aria-hidden="true">
+  <span class="node"><i><svg><use href="#i-server"/></svg></i><b>Servidor</b></span>
+  <span class="wire"><i></i></span>
+  <span class="node"><b>TNAS</b><i><svg><use href="#i-nas"/></svg></i></span>
+</div></template>
+<div class="shell">
 <!-- Plain form posts with the standard field names and autocomplete tokens,
      so password managers (Bitwarden) fill them in and offer to save them. -->
 <form method="post" action="/login" id="login">
-  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
-  <h1>Failover do homelab</h1>
-  <p class="sub">Entra para ver e controlar o failover.</p>
+  <div class="head"><span class="logo" aria-hidden="true"><svg><use href="#i-swap"/></svg></span>
+    <div><h1>Failover do homelab</h1><p class="sub">Entra para ver e controlar o failover.</p></div></div>
+  <div data-topo></div>
   <label for="username">Utilizador</label>
-  <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+  <div class="field"><svg><use href="#i-user"/></svg>
+    <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></div>
   <label for="password">Password</label>
-  <input id="password" name="password" type="password" autocomplete="current-password" required>
-  <p class="err" id="err" role="alert" hidden>Utilizador ou password errados.</p>
-  <button type="submit">Entrar</button>
+  <div class="field"><svg><use href="#i-lock"/></svg>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="button" class="peek" aria-label="Mostrar a password" aria-pressed="false"><svg><use href="#i-eye"/></svg></button></div>
+  <p class="err" id="err" role="alert" hidden><svg><use href="#i-alert"/></svg><span>Utilizador ou password errados.</span></p>
+  <button type="submit" class="go">Entrar<svg><use href="#i-arrow"/></svg></button>
 </form>
 <!-- The first visit: no account yet, whoever opens the page makes it. -->
 <form method="post" action="/setup" id="setup" hidden>
-  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
-  <h1>Criar a conta de administrador</h1>
-  <p class="sub">É a primeira vez que abres o failover. Escolhe o utilizador e a password com que vais entrar.</p>
+  <div class="head"><span class="logo" aria-hidden="true"><svg><use href="#i-swap"/></svg></span>
+    <div><h1>Criar a conta de administrador</h1><p class="sub">É a primeira vez que abres o failover.</p></div></div>
+  <div data-topo></div>
   <label for="s-username">Utilizador</label>
-  <input id="s-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+  <div class="field"><svg><use href="#i-user"/></svg>
+    <input id="s-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
   <label for="s-password">Password <small>(pelo menos 8 caracteres)</small></label>
-  <input id="s-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+  <div class="field"><svg><use href="#i-lock"/></svg>
+    <input id="s-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+    <button type="button" class="peek" aria-label="Mostrar a password" aria-pressed="false"><svg><use href="#i-eye"/></svg></button></div>
   <label for="s-password2">Repetir a password</label>
-  <input id="s-password2" name="password2" type="password" autocomplete="new-password" minlength="8" required>
-  <p class="err" id="s-err" role="alert" hidden></p>
-  <button type="submit">Criar e entrar</button>
+  <div class="field"><svg><use href="#i-lock"/></svg>
+    <input id="s-password2" name="password2" type="password" autocomplete="new-password" minlength="8" required></div>
+  <p class="err" id="s-err" role="alert" hidden><svg><use href="#i-alert"/></svg><span></span></p>
+  <button type="submit" class="go">Criar e entrar<svg><use href="#i-arrow"/></svg></button>
 </form>
 <form id="closed" hidden>
-  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 9l-4-4v3h-7v2h7v3M7 11l-4 4l4 4v-3h7v-2H7z"/></svg></span>
-  <h1>Ainda não há conta</h1>
-  <p class="sub">A conta só se cria nos 30 minutos a seguir ao arranque do agente, para ninguém na rede a criar antes de ti. Reinicia o container (<code>docker restart failover-agent</code>) e abre esta página logo a seguir.</p>
+  <div class="head"><span class="logo" aria-hidden="true"><svg><use href="#i-swap"/></svg></span>
+    <div><h1>Ainda não há conta</h1><p class="sub">A conta só se cria nos 30 minutos a seguir ao arranque.</p></div></div>
+  <p class="note">Assim ninguém na rede a cria antes de ti. Reinicia o container (<code>docker restart failover-agent</code>) e abre esta página logo a seguir.</p>
 </form>
+<p class="foot">failover-agent {{version}}</p>
+</div>
 <script>
+const $ = id => document.getElementById(id);
 const mode = document.body.dataset.setup, erro = new URLSearchParams(location.search).get('erro');
 const why = {curta: 'A password tem de ter pelo menos 8 caracteres.', longa: 'A password pode ter até 72 caracteres.', diferentes: 'As duas passwords não são iguais.',
   utilizador: 'Escolhe um utilizador, sem espaços.', existe: 'A conta já foi criada: entra com ela.',
   fora: 'Já passaram 30 minutos desde o arranque: reinicia o agente para criar a conta.', erro: 'Não foi possível guardar a conta.'};
+document.querySelectorAll('[data-topo]').forEach(el => el.replaceWith($('topo').content.cloneNode(true)));
+const fail = (form, err) => {
+  err.hidden = false;
+  if (why[erro]) err.lastElementChild.textContent = why[erro];
+  form.classList.add('shake');
+};
 if (mode === 'open') {
-  document.getElementById('login').hidden = true;
-  document.getElementById('setup').hidden = false;
-  document.getElementById('s-username').focus();
-  if (erro && why[erro]) Object.assign(document.getElementById('s-err'), {hidden: false, textContent: why[erro]});
+  $('login').hidden = true;
+  $('setup').hidden = false;
+  $('s-username').focus();
+  if (erro && why[erro]) fail($('setup'), $('s-err'));
 } else if (mode === 'closed') {
-  document.getElementById('login').hidden = true;
-  document.getElementById('closed').hidden = false;
+  $('login').hidden = true;
+  $('closed').hidden = false;
 } else if (erro) {
-  const e = document.getElementById('err');
-  e.hidden = false;
-  if (why[erro]) e.textContent = why[erro];
+  fail($('login'), $('err'));
 }
+// show or hide the password typed
+document.addEventListener('click', e => {
+  const p = e.target.closest('.peek');
+  if (!p) return;
+  const i = p.parentElement.querySelector('input'), show = i.type === 'password';
+  i.type = show ? 'text' : 'password';
+  p.setAttribute('aria-pressed', show);
+  p.setAttribute('aria-label', show ? 'Esconder a password' : 'Mostrar a password');
+});
+// the packet runs the wire's whole width
+const sizeWires = () => document.querySelectorAll('.wire').forEach(w => w.style.setProperty('--w', w.clientWidth + 'px'));
+addEventListener('resize', sizeWires);
+sizeWires();
 </script>
 </body>
 </html>

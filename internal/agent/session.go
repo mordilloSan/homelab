@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
+	"html"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -126,10 +127,10 @@ func (a *Agent) getLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	page := loginHTML
+	page := bytes.Replace(loginHTML, []byte("{{version}}"), []byte(html.EscapeString(Version)), 1)
 	if a.creds.Load() == nil {
 		mode := map[bool]string{true: "open", false: "closed"}[time.Since(a.started) < setupWindow]
-		page = bytes.Replace(loginHTML, []byte("<body>"), []byte(`<body data-setup="`+mode+`">`), 1)
+		page = bytes.Replace(page, []byte("<body>"), []byte(`<body data-setup="`+mode+`">`), 1)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(page)

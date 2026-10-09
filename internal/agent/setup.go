@@ -49,6 +49,7 @@ func chownLikeDir(path string) {
 type creds struct {
 	User         string `yaml:"user"`
 	PasswordHash string `yaml:"password_hash"`
+	APITokenHash string `yaml:"api_token_sha256,omitempty"` // GET /api/ with this token, for a dashboard
 }
 
 var bcryptCost = bcrypt.DefaultCost // tests lower it: the race detector makes bcrypt slow
@@ -84,5 +85,5 @@ func saveUser(path string, c *creds) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, append([]byte("# Gerido pela interface. Só guarda o hash (bcrypt) da password.\n"), b...))
+	return writeAtomic(path, append([]byte("# Gerido pela interface. Só guarda os hashes da password (bcrypt) e do token da API (sha256).\n"), b...))
 }

@@ -32,6 +32,17 @@ func TestObserveAndNightlyMailed(t *testing.T) {
 	if !mailed(g, "descarga noturna com falhas") || !mailed(g, "immich") {
 		t.Fatalf("noite com falhas sem email: %+v", g.mails)
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n := 0
+	for _, c := range g.cmds {
+		if strings.HasPrefix(c, "docker compose -p failover-immich") {
+			n++
+		}
+	}
+	if n != 2 { // tried again after a minute: a registry's rate limit passes
+		t.Fatalf("%d descargas do immich, esperava 2", n)
+	}
 }
 
 // A certificate already told about is not told again after a restart.

@@ -141,7 +141,27 @@ export function renderSettings() {
   SECTIONS.forEach(x => paintSec(x.id, sectionHtml(x)));
   paintSec('conta', `<h2>Conta</h2>
       ${kv([['Utilizador', mono(st.user)]])}
-      <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>`);
+      <div class="sec-btns"><button class="btn" data-pw>${icon('key')}Mudar password</button></div>
+    <div class="sec-sub"><p class="note-text">Para um painel como o Homepage: ${mono('GET ' + location.origin + '/api/')} com o cabeçalho
+        ${mono('Authorization: Bearer <token>')}. Só lê o resumo; nada muda com ele.</p>
+      ${kv([['Token da API', st.api_token ? chip('Definido', 'var(--success)', 'xs') : chip('Em falta', 'var(--warning)', 'xs')]])}
+      ${apiToken ? `<label class="pw-field">Copia-o agora: não volta a ser mostrado<input readonly class="mono" value="${esc(apiToken)}" data-select></label>` : ''}
+      <div class="sec-btns"><button type="button" class="btn" data-api-token>${icon('key')}${st.api_token ? 'Gerar outro' : 'Gerar token'}</button></div></div>`);
+}
+
+// The API token just made: shown until the page is reloaded, never sent again.
+let apiToken = '';
+async function makeApiToken() {
+  if (st.api_token && !await confirmAction('Gerar outro token?', 'O token atual deixa de funcionar: o painel que o usa tem de receber o novo.', 'Gerar')) return;
+  try {
+    const r = toLogin(await fetch('api/token', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}));
+    if (!r.ok) throw new Error((await readErr(r)).error);
+    apiToken = (await r.json()).token;
+    toast(await navigator.clipboard?.writeText(apiToken).then(() => 'Token gerado e copiado', () => 'Token gerado') ?? 'Token gerado');
+    refresh();
+  } catch (err) {
+    toast(sentence(err.message), false);
+  }
 }
 
 // What the agent discovered (GET /api/discover): proposals only. It runs
@@ -380,6 +400,8 @@ document.addEventListener('click', e => {
     return;
   }
   if (e.target.closest('[data-restart]')) restartAgent();
+  if (e.target.closest('[data-api-token]')) makeApiToken();
+  e.target.closest('[data-select]')?.select();
 });
 addEventListener('beforeunload', e => {
   if (document.querySelector('form.set-form[data-dirty]') || [...document.querySelectorAll('.dns-token')].some(x => x.value)) e.preventDefault();
